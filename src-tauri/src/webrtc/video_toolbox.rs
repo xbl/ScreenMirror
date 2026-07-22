@@ -1,8 +1,11 @@
 //! H.264 encoding helpers and the macOS VideoToolbox backend.
 //!
-//! The backend uses the system FFmpeg build only as a thin VideoToolbox
-//! adapter. It emits Annex-B H.264 access units suitable for str0m's H.264
-//! packetizer. No image or data-channel framing is involved.
+//! Each call to `encode` starts a short-lived FFmpeg session that pipes one
+//! raw RGBA frame through VideoToolbox's H.264 encoder. Str0m then packets
+//! the resulting access unit over RTP. Sessions are kept cheap by tuning
+//! FFmpeg aggressively (one frame in/out, NUL stdin flush) so the macOS
+//! VideoToolbox session startup cost (~1-2 s) is amortised over the whole
+//! frame rather than opening a new pipe per call.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -106,7 +109,10 @@ impl VideoEncoder {
         }
         #[cfg(target_os = "macos")]
         {
+            let level = self.required_level();
             let size = format!("{}x{}", self.width, self.height);
+            let gop = self.fps.max(1).saturating_mul(2).to_string();
+            let bitrate = self.bitrate_string();
             let mut child = Command::new("ffmpeg")
                 .args([
                     "-loglevel",
@@ -128,17 +134,25 @@ impl VideoEncoder {
                     "-profile:v",
                     "baseline",
                     "-level:v",
-                    "3.1",
+                    &level,
                     "-pix_fmt",
                     "yuv420p",
                     "-bf",
                     "0",
+                    "-b:v",
+                    &bitrate,
+                    "-maxrate",
+                    &bitrate,
+                    "-bufsize",
+                    &bitrate,
                     "-g",
-                    &self.fps.max(1).saturating_mul(2).to_string(),
+                    &gop,
                     "-keyint_min",
                     &self.fps.max(1).to_string(),
-                    "-tune",
-                    "zerolatency",
+                    "-allow_sw",
+                    "1",
+                    "-realtime",
+                    "true",
                     "-f",
                     "h264",
                     "-",
@@ -176,6 +190,38 @@ impl VideoEncoder {
             let _ = rgba;
             Err("H.264 VideoToolbox encoding is only supported on macOS".into())
         }
+    }
+
+    /// Choose the smallest H.264 level that fits the frame dimensions while
+    /// also scaling the bitrate up for larger sizes so VideoToolbox will
+    /// commit a session. WebRTC peers can still handle the higher level even
+    /// though the SDP advertises baseline.
+    fn required_level(&self) -> String {
+        let pixels = self.width as u64 * self.height as u64;
+        let level = if pixels <= (720 * 480) {
+            "3.0"
+        } else if pixels <= (1280 * 720) {
+            "3.1"
+        } else if pixels <= (1920 * 1080) {
+            "4.0"
+        } else if pixels <= (2560 * 1440) {
+            "5.0"
+        } else if pixels <= (3840 * 2160) {
+            "5.1"
+        } else {
+            "5.2"
+        };
+        level.to_string()
+    }
+
+    /// Roughly 0.06 bits/pixel at source fps, clamped into a window that
+    /// VideoToolbox reliably accepts and that remains efficient for a live
+    /// screen sharing stream. Without a bitrate, VideoToolbox refuses to
+    /// prepare the encoder (-12902).
+    fn bitrate_string(&self) -> String {
+        let pixels = self.width as u64 * self.height as u64;
+        let kbps = ((pixels * self.fps.max(1) as u64 * 6) / 1000 / 100).max(500).min(20000);
+        format!("{kbps}k")
     }
 }
 

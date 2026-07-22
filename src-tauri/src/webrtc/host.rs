@@ -128,6 +128,9 @@ impl HostPeer {
             let timestamp_step = 90_000 / i64::from(fps.max(1));
             let mut capture_started = false;
             'outer: loop {
+                // Drain every output (events / transmit packets / pending timeouts)
+                // before falling back to the network read. str0m::Rtc::poll_output
+                // returns None once the queue is empty.
                 loop {
                     let poll_result = {
                         let mut guard = rtc_arc.lock();
@@ -148,14 +151,31 @@ impl HostPeer {
                             break;
                         }
                         Ok(Output::Transmit(packet)) => {
-                            let _ = socket.send_to(&packet.contents, packet.destination);
+                            if let Err(err) =
+                                socket.send_to(&packet.contents, packet.destination)
+                            {
+                                tracing::warn!(
+                                    "host: socket send failed ({} bytes -> {}): {err}",
+                                    packet.contents.len(),
+                                    packet.destination
+                                );
+                            }
                         }
                         Ok(Output::Event(Event::MediaAdded(event)))
                             if event.kind == MediaKind::Video =>
                         {
                             video_mid = Some(event.mid);
                             *video_mid_slot.lock() = video_mid;
+                            tracing::info!(
+                                "host: MediaAdded mid={:?} direction={:?}",
+                                event.mid,
+                                event.direction
+                            );
                             if !capture_started {
+                                tracing::info!(
+                                    "host: starting capture loop target={:?} fps={fps}",
+                                    target
+                                );
                                 *capture_handle_for_loop.lock() =
                                     Some(spawn_video_capture_loop(target, fps, sink.clone()));
                                 capture_started = true;
@@ -178,6 +198,7 @@ impl HostPeer {
                         if frame.data.is_empty() {
                             continue;
                         }
+                        let now = Instant::now();
                         let mut guard = rtc_arc.lock();
                         if let Some(rtc) = guard.as_mut() {
                             if let Some(writer) = rtc.writer(mid) {
@@ -185,13 +206,50 @@ impl HostPeer {
                                     let pt = params.pt();
                                     if let Err(error) = writer.write(
                                         pt,
-                                        Instant::now(),
+                                        now,
                                         MediaTime::new(timestamp, 90_000),
                                         frame.data,
                                     ) {
                                         tracing::warn!("host: H.264 writer failed: {error}");
                                     }
                                     timestamp = timestamp.wrapping_add(timestamp_step);
+                                    // Drive packetization and pacing for the sample we
+                                    // just queued. str0m holds onto the sample in
+                                    // `to_payload` until we feed it Input::Timeout.
+                                    if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
+                                        tracing::warn!(
+                                            "host: failed to flush timeout after write: {error}"
+                                        );
+                                    }
+                                    // Drain any pending transmits/media events immediately
+                                    // instead of waiting for the next outer poll_output
+                                    // iteration, otherwise pacing pushes them out later and
+                                    // the viewer stays black until enough frames are queued.
+                                    loop {
+                                        let drained = {
+                                            let mut guard = rtc_arc.lock();
+                                            let Some(rtc) = guard.as_mut() else {
+                                                break;
+                                            };
+                                            rtc.poll_output()
+                                        };
+                                        match drained {
+                                            Ok(Output::Transmit(packet)) => {
+                                                let _ = socket.send_to(
+                                                    &packet.contents,
+                                                    packet.destination,
+                                                );
+                                            }
+                                            Ok(Output::Timeout(_)) => break,
+                                            Ok(Output::Event(_)) => {}
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    "host: post-write poll error: {error}"
+                                                );
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

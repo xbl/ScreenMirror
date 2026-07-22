@@ -137,8 +137,14 @@ pub fn spawn_video_capture_loop(
     let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
+    tracing::info!(
+        "video capture loop spawned target={:?} fps={fps} interval={:?}",
+        target,
+        interval
+    );
     std::thread::spawn(move || {
         let mut encoder: Option<VideoEncoder> = None;
+        let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             match capture_one(&target) {
                 Ok(frame) => {
@@ -155,7 +161,18 @@ pub fn spawn_video_capture_loop(
                     }
                     if let Some(value) = encoder.as_ref() {
                         match value.encode(frame.rgba.as_raw()) {
-                            Ok(encoded) => sink(encoded),
+                            Ok(encoded) => {
+                                frames = frames.wrapping_add(1);
+                                if frames % 30 == 1 {
+                                    tracing::info!(
+                                        "video capture: encoded frame #{} ({} bytes, keyframe={})",
+                                        frames,
+                                        encoded.data.len(),
+                                        encoded.keyframe
+                                    );
+                                }
+                                sink(encoded);
+                            }
                             Err(error) => tracing::warn!("H.264 encode error: {error}"),
                         }
                     }
