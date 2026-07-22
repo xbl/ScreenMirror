@@ -4,6 +4,7 @@ use image::RgbaImage;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod ffi;
 pub mod host;
 pub mod video_toolbox;
 
