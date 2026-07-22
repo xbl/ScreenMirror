@@ -1,0 +1,91 @@
+/* Design tokens for the Screenmirror host UI.
+ * Quiet console palette + a single signal-cyan accent that echoes the new
+ * app icon's gradient. Type is three roles: display (Fraunces, serif),
+ * body (system sans), mono (system mono).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surface ladder — barely-there steps, no shadows. */
+  --bg: #0e1116;
+  --surface: #161a21;
+  --surface-2: #1d222b;
+  --surface-3: #242a35;
+
+  /* Hairline borders and subtle dividers. */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* Text: warm bone, not pure white; muted for secondary info. */
+  --text: #e8e4dc;
+  --text-strong: #f7f4ee;
+  --muted: #8a8579;
+  --muted-2: #5d5952;
+
+  /* Accent: signal cyan, picked up from the icon mid-stop. */
+  --accent: #7be0d2;
+  --accent-strong: #a3ecdf;
+  --accent-dim: rgba(123, 224, 210, 0.12);
+  --accent-line: rgba(123, 224, 210, 0.32);
+
+  /* Functional. */
+  --danger: #e27d60;
+  --danger-dim: rgba(226, 125, 96, 0.12);
+  --warn: #e8c468;
+
+  /* Type stack. */
+  --font-display:
+    'Fraunces', 'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  --font-body:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI',
+    system-ui, sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+
+  /* Modular scale 1.250. */
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-15: 0.9375rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-22: 1.375rem;
+  --fs-28: 1.75rem;
+  --fs-36: 2.25rem;
+  --fs-48: 3rem;
+
+  /* Spacing scale (4px base). */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --line: 1px solid var(--border);
+  --line-strong: 1px solid var(--border-strong);
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    --motion: 180ms;
+  }
+}

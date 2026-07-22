@@ -1,0 +1,33 @@
+export default {
+  viewer: {
+    title: 'Screenmirror 观看端',
+    reinitiate: '重新连接',
+    waitingForAllow: '等待主机允许连接...',
+    waitingForSource: '等待主机选择分享源...',
+    connected: '已连接!',
+    myDevice: '我的设备信息',
+    deviceType: '设备类型',
+    deviceIp: '设备 IP',
+    deviceBrowser: '浏览器',
+    deviceOs: '系统',
+    connectionId: '连接 ID',
+    ipHelp: '请确认该 IP 与主机应用中显示的一致。',
+    notAllowed: '主机未允许你连接',
+    disconnected: '连接已断开',
+    unknown: '发生未知错误',
+  },
+  controls: {
+    play: '播放',
+    pause: '暂停',
+    quality: '画质',
+    fullscreen: '全屏',
+  },
+  privacy: {
+    title: '隐私',
+    intro: 'Screenmirror 只在局域网内镜像你的屏幕。我们不需要任何数据来提供这个功能。',
+    bullet1: '没有分析、遥测或第三方追踪。',
+    bullet2: '画面通过 WebRTC 点对点传输，主机不会保存画面。',
+    bullet3: '不会向第三方发送数据。',
+    close: '关闭',
+  },
+};

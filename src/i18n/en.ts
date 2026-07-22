@@ -1,0 +1,91 @@
+export default {
+  app: {
+    title: 'Screenmirror',
+    reset: 'Reset',
+  },
+  hero: {
+    headline: 'Share this screen.',
+    subhead: 'Scan the code or send the link to any device on the same network.',
+  },
+  card: {
+    sameWifi: 'Same Wi-Fi',
+    waitingForServer: 'Starting up…',
+    slotUnavailable: 'A viewer is already connected.',
+    copy: 'Copy link',
+    copied: 'Copied',
+    copyFailed: 'Copy failed — select and copy manually',
+    oneViewer: '1 viewer connected',
+    manyViewers: '{n} viewers connected',
+  },
+  source: {
+    label: 'Sharing source',
+    screen: 'Entire screen',
+    window: 'Application window',
+    refresh: 'Refresh sources',
+  },
+  start: {
+    idle: 'Start sharing',
+    sharing: 'Sharing',
+    stop: 'Stop',
+    stopHint: 'Stop sharing to switch sources',
+  },
+  topbar: {
+    settings: 'Settings',
+    devices: 'Connected devices',
+  },
+  devices: {
+    title: 'Connected devices',
+    disconnect: 'Disconnect',
+    disconnectAll: 'Disconnect all',
+    none: 'No devices connected.',
+    approve: 'Allow',
+    deny: 'Deny',
+  },
+  settings: {
+    title: 'Settings',
+    language: 'Language',
+    version: 'Version',
+    source: 'Source',
+    close: 'Close',
+  },
+  permission: {
+    title: 'Screen recording permission required',
+    message:
+      'Screenmirror needs screen recording access on macOS to share your screen.',
+    openSettings: 'Open System Settings',
+    restart: 'Restart app',
+    restartReminder: 'After granting access, restart the app.',
+  },
+  offline: {
+    title: 'No network connection',
+    detail: 'Connect to a Wi-Fi or wired network to share your screen.',
+    waiting: 'Waiting for connection…',
+  },
+  errors: {
+    notAllowed: 'You were not allowed to connect',
+    disconnected: 'You were disconnected',
+    unknown: 'An unknown error occurred',
+  },
+  viewer: {
+    title: 'Screenmirror viewer',
+    reinitiate: 'Reconnect',
+    waitingForAllow: 'Waiting for host to allow your device…',
+    waitingForSource: 'Waiting for host to choose a source…',
+    connected: 'Connected',
+    myDevice: 'My device',
+    deviceType: 'Device type',
+    deviceIp: 'IP',
+    deviceBrowser: 'Browser',
+    deviceOs: 'OS',
+    connectionId: 'Connection ID',
+  },
+  privacy: {
+    title: 'No analytics',
+    intro:
+      'Screenmirror does not collect analytics, crash reports, or any usage data.',
+    bullet1: 'No analytics, telemetry, or third-party tracking.',
+    bullet2: 'Screen frames stay on your local network between your devices.',
+    bullet3: 'Source code is open for review.',
+    close: 'Close',
+  },
+};

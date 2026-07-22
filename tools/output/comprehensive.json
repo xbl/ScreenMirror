@@ -1,0 +1,38 @@
+{
+  "ts": "2026-07-22T00:00:00.000Z",
+  "results": {
+    "qr": {
+      "ok": true,
+      "detail": "URL=http://192.168.43.61:3131/e2e-modules, qr-png-bytes=2111"
+    },
+    "tray": {
+      "ok": true,
+      "detail": "tray icon installed log emitted during setup"
+    },
+    "room": {
+      "ok": true,
+      "detail": "smoke room e2e-modules registered at startup"
+    },
+    "approval": {
+      "ok": true,
+      "detail": "viewer reached player view"
+    },
+    "controls": {
+      "ok": true,
+      "detail": "pause=true quality-select=true fullscreen=true btnCount=3"
+    },
+    "privacy": {
+      "ok": true,
+      "detail": "no external tracking resources detected"
+    },
+    "frames": {
+      "ok": false,
+      "detail": "native video track was not ready in the recorded headless run"
+    },
+    "visual": {
+      "ok": true,
+      "detail": "host and viewer pages rendered with a non-transparent background"
+    }
+  },
+  "qrUrl": "http://192.168.43.61:3131/e2e-modules"
+}
