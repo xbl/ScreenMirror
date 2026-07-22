@@ -6,6 +6,10 @@ fn main() {
     let ffmpeg_include = PathBuf::from(&ffmpeg_dir).join("include");
 
     println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavcodec/avcodec.h").display());
+    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/avutil.h").display());
+    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/opt.h").display());
+    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/pixfmt.h").display());
+    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libswscale/swscale.h").display());
     println!("cargo:rerun-if-changed=build.rs");
 
     let bindings = bindgen::Builder::default()
