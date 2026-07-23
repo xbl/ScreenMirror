@@ -7,6 +7,7 @@ use std::time::Duration;
 pub mod ffi;
 pub mod host;
 pub mod video_toolbox;
+pub mod video_toolbox_native;
 
 pub use host::HostPeer;
 pub use video_toolbox::{H264EncodedFrame, VideoEncoder};
