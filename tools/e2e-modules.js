@@ -255,17 +255,8 @@ async function main() {
     const okFrames = framesState.videoWidth > 0 && framesState.videoHeight > 0 && framesState.readyState >= 2 && framesState.currentTime > 0;
     record('frames', okFrames, `video ${framesState.videoWidth}x${framesState.videoHeight}, readyState=${framesState.readyState}, timeDelta=${framesState.currentTime.toFixed(3)}s`);
 
-    // Latency: measure encode-side timing from the capture loop's logs.
-    // The capture loop emits "video capture: encoded frame #N total_elapsed=…"
-    // lines via tracing, with ISO-format timestamps at the START of each
-    // line. The first few frames (1..3) get a verbose log; later frames
-    // (31, 61, …) get a brief log. Same frame # can appear twice when both
-    // conditions match (e.g. frame #1 hits both `frames <= 3` and
-    // `frames % 30 == 1`), so we dedupe by frame number, keeping the
-    // earliest timestamp for each frame. We then compute (a) the gap
-    // between frame #1 and frame #2 (proxy for first-frame latency from
-    // session start), and (b) average inter-frame spacing across the
-    // captured frames (proxy for steady-state encode).
+    // Latency: retain ISO timestamp parsing as a fallback/supplementary
+    // measurement for both verbose and sparse encoded-frame log lines.
     const stderrBlob = stderrLines.join('');
     const re = /(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)[^\n]*video capture: encoded frame #(\d+)/g;
     const byFrame = new Map();
@@ -276,16 +267,37 @@ async function main() {
       if (!Number.isNaN(ts) && !byFrame.has(frameNum)) byFrame.set(frameNum, ts);
     }
     const encodeTimestamps = [...byFrame.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
-
-    const firstFrameMs = encodeTimestamps.length >= 2
+    const fallbackFirstFrameMs = encodeTimestamps.length >= 2
       ? encodeTimestamps[1] - encodeTimestamps[0]
       : 0;
-    const avgEncodedFrameMs = encodeTimestamps.length > 2
+    const fallbackAvgFrameMs = encodeTimestamps.length > 2
       ? (encodeTimestamps[encodeTimestamps.length - 1] - encodeTimestamps[0]) / (encodeTimestamps.length - 1)
       : 0;
 
-    record('firstEncodedFrameMs', firstFrameMs > 0 && firstFrameMs < 3000, `firstFrameMs=${firstFrameMs} frames=${encodeTimestamps.length}`);
-    record('avgEncodedFrameMs', avgEncodedFrameMs > 0 && avgEncodedFrameMs < 200, `avgEncodedFrameMs=${avgEncodedFrameMs.toFixed(1)} frames=${encodeTimestamps.length}`);
+    // Authoritative timing: parse `total_elapsed=` from verbose log lines
+    // (frames 1-3). The first value is capture-thread-to-first-packet latency;
+    // subsequent deltas measure per-frame encode spacing.
+    const verboseMatches = [...stderrBlob.matchAll(/video capture: encoded frame #(\d+) total_elapsed=([0-9.]+)s/g)];
+    const totalElapsedSec = verboseMatches
+      .map((m) => ({ frame: parseInt(m[1], 10), seconds: parseFloat(m[2]) }))
+      .filter(({ frame, seconds }) => frame >= 1 && frame <= 3 && !Number.isNaN(seconds))
+      .sort((a, b) => a.frame - b.frame)
+      .map(({ seconds }) => seconds);
+
+    const firstEncodedFrameMs = totalElapsedSec.length > 0
+      ? totalElapsedSec[0] * 1000
+      : fallbackFirstFrameMs;
+    let avgEncodedFrameMs = fallbackAvgFrameMs;
+    if (totalElapsedSec.length >= 2) {
+      const deltas = [];
+      for (let i = 1; i < totalElapsedSec.length; i++) {
+        deltas.push((totalElapsedSec[i] - totalElapsedSec[i - 1]) * 1000);
+      }
+      avgEncodedFrameMs = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    }
+
+    record('firstEncodedFrameMs', firstEncodedFrameMs > 0 && firstEncodedFrameMs < 3000, `firstEncodedFrameMs=${firstEncodedFrameMs.toFixed(0)} verboseFrames=${totalElapsedSec.length} timestampFrames=${encodeTimestamps.length}`);
+    record('avgEncodedFrameMs', avgEncodedFrameMs > 0 && avgEncodedFrameMs < 200, `avgEncodedFrameMs=${avgEncodedFrameMs.toFixed(1)} verboseFrames=${totalElapsedSec.length} timestampFrames=${encodeTimestamps.length}`);
 
     // Screenshot
     const shot = path.join(OUT_DIR, 'viewer-comprehensive.png');
