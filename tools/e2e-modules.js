@@ -79,6 +79,8 @@ const results = {
   controls: null,
   privacy: null,
   frames: null,
+  firstEncodedFrameMs: null,
+  avgEncodedFrameMs: null,
   rebrand: null,
   visual: null,
 };
@@ -252,6 +254,38 @@ async function main() {
     });
     const okFrames = framesState.videoWidth > 0 && framesState.videoHeight > 0 && framesState.readyState >= 2 && framesState.currentTime > 0;
     record('frames', okFrames, `video ${framesState.videoWidth}x${framesState.videoHeight}, readyState=${framesState.readyState}, timeDelta=${framesState.currentTime.toFixed(3)}s`);
+
+    // Latency: measure encode-side timing from the capture loop's logs.
+    // The capture loop emits "video capture: encoded frame #N total_elapsed=…"
+    // lines via tracing, with ISO-format timestamps at the START of each
+    // line. The first few frames (1..3) get a verbose log; later frames
+    // (31, 61, …) get a brief log. Same frame # can appear twice when both
+    // conditions match (e.g. frame #1 hits both `frames <= 3` and
+    // `frames % 30 == 1`), so we dedupe by frame number, keeping the
+    // earliest timestamp for each frame. We then compute (a) the gap
+    // between frame #1 and frame #2 (proxy for first-frame latency from
+    // session start), and (b) average inter-frame spacing across the
+    // captured frames (proxy for steady-state encode).
+    const stderrBlob = stderrLines.join('');
+    const re = /(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)[^\n]*video capture: encoded frame #(\d+)/g;
+    const byFrame = new Map();
+    let _m;
+    while ((_m = re.exec(stderrBlob))) {
+      const ts = new Date(_m[1]).getTime();
+      const frameNum = parseInt(_m[2], 10);
+      if (!Number.isNaN(ts) && !byFrame.has(frameNum)) byFrame.set(frameNum, ts);
+    }
+    const encodeTimestamps = [...byFrame.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
+
+    const firstFrameMs = encodeTimestamps.length >= 2
+      ? encodeTimestamps[1] - encodeTimestamps[0]
+      : 0;
+    const avgEncodedFrameMs = encodeTimestamps.length > 2
+      ? (encodeTimestamps[encodeTimestamps.length - 1] - encodeTimestamps[0]) / (encodeTimestamps.length - 1)
+      : 0;
+
+    record('firstEncodedFrameMs', firstFrameMs > 0 && firstFrameMs < 3000, `firstFrameMs=${firstFrameMs} frames=${encodeTimestamps.length}`);
+    record('avgEncodedFrameMs', avgEncodedFrameMs > 0 && avgEncodedFrameMs < 200, `avgEncodedFrameMs=${avgEncodedFrameMs.toFixed(1)} frames=${encodeTimestamps.length}`);
 
     // Screenshot
     const shot = path.join(OUT_DIR, 'viewer-comprehensive.png');
