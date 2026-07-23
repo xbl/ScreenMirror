@@ -32,6 +32,8 @@ async function startNegotiation() {
   // Ask the host for a real WebRTC video track. ICE candidates are gathered
   // into the SDP so the existing signaling path remains unchanged.
   pc.value = new RTCPeerConnection({ iceServers: [] });
+  // expose PC so PlayerView can subscribe to connectionstatechange
+  (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
     const stream = event.streams[0] ?? new MediaStream([event.track]);

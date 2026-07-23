@@ -117,6 +117,18 @@ function scheduleDisconnected() {
   }, 5000);
 }
 
+// Streaming-only: if the RTCPeerConnection fails mid-session (e.g. host
+// stops sharing), flip to disconnected immediately. This complements
+// scheduleDisconnected, which only covers the pre-stream case.
+let pcRef: RTCPeerConnection | null = null;
+function onPcFailure() {
+  if (!pcRef) return;
+  const s = pcRef.connectionState ?? pcRef.iceConnectionState ?? '';
+  if (s === 'disconnected' || s === 'failed' || s === 'closed') {
+    if (status.value === 'streaming') markDisconnected();
+  }
+}
+
 onMounted(() => {
   status.value = 'connecting';
   window.addEventListener('viewer-stream', onStream);
@@ -128,6 +140,15 @@ onMounted(() => {
     ws.addEventListener('close', scheduleDisconnected);
     ws.addEventListener('error', scheduleDisconnected);
   }
+  // If the RTCPeerConnection drops mid-stream, surface disconnected
+  // immediately (no 5s grace period) so the viewer doesn't sit on a
+  // frozen frame.
+  const pc = (window as unknown as { __smPc?: RTCPeerConnection }).__smPc;
+  if (pc) {
+    pcRef = pc;
+    pc.addEventListener('iceconnectionstatechange', onPcFailure);
+    pc.addEventListener('connectionstatechange', onPcFailure);
+  }
   emit('state', 2);
 });
 
@@ -135,6 +156,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;
   if (disconnectedTimer !== undefined) window.clearTimeout(disconnectedTimer);
+  if (pcRef) {
+    pcRef.removeEventListener('iceconnectionstatechange', onPcFailure);
+    pcRef.removeEventListener('connectionstatechange', onPcFailure);
+    pcRef = null;
+  }
   // reset is exported so callers / tests can drive transitions if needed.
   void reset;
 });
