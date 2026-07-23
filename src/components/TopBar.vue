@@ -113,6 +113,10 @@ const { t } = useI18n();
   position: sticky;
   top: 0;
   z-index: 5;
+  /* Tauri 'Overlay' titlebar: this entire bar routes drags to window
+     dragging on macOS. Buttons override with -webkit-app-region: no-drag
+     below; new interactive elements inside the bar must do the same. */
+  -webkit-app-region: drag;
 }
 
 .top-brand {
@@ -120,6 +124,11 @@ const { t } = useI18n();
   align-items: center;
   gap: var(--sp-2);
   color: var(--text);
+}
+
+.top-brand,
+.top-btn {
+  -webkit-app-region: no-drag;
 }
 
 .top-mark {
