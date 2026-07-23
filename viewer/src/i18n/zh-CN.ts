@@ -30,4 +30,10 @@ export default {
     bullet3: '不会向第三方发送数据。',
     close: '关闭',
   },
+  player: {
+    connecting: '连接中…',
+    streaming: '正在传输',
+    disconnected: '连接已断开',
+    reconnect: '重新连接',
+  },
 };

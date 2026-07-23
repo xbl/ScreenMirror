@@ -30,6 +30,12 @@ export default {
     bullet3: 'No data is sent to a third party.',
     close: 'Close',
   },
+  player: {
+    connecting: 'Connecting…',
+    streaming: 'Streaming',
+    disconnected: 'Connection lost',
+    reconnect: 'Reconnect',
+  },
 };
 
 export type Messages = typeof import('./en').default;
