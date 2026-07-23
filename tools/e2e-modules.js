@@ -81,6 +81,8 @@ const results = {
   frames: null,
   firstEncodedFrameMs: null,
   avgEncodedFrameMs: null,
+  viewerStatusPill: null,
+  viewerSpinner: null,
   rebrand: null,
   visual: null,
 };
@@ -242,6 +244,28 @@ async function main() {
       'controls',
       okCtrl,
       `pause=${controlsState.hasPause} quality-select=${controlsState.hasQuality} fullscreen=${controlsState.hasFullscreen} btnCount=${controlsState.buttonCount}`,
+    );
+
+    // (5b) Viewer status indicator: confirm the corner pill + spinner render
+    //      once the player view is mounted. The pill should report
+    //      'streaming' once frames flow, but at minimum the wrapper element
+    //      and a [data-state] attribute must exist.
+    const statusState = await page.evaluate(() => {
+      const pill = document.querySelector('.player-status');
+      const spinner = document.querySelector('.spinner');
+      const dataState = pill?.getAttribute('data-state') ?? null;
+      const text = pill?.textContent?.trim() ?? '';
+      return { hasPill: !!pill, hasSpinner: !!spinner, dataState, text };
+    });
+    record(
+      'viewerStatusPill',
+      statusState.hasPill && statusState.dataState === 'streaming',
+      `pill=${statusState.hasPill} state=${statusState.dataState} text=${JSON.stringify(statusState.text)}`,
+    );
+    record(
+      'viewerSpinner',
+      statusState.hasSpinner || statusState.dataState === 'streaming',
+      `spinner=${statusState.hasSpinner} (note: spinner unmounts once streaming)`,
     );
 
     // Video: verify a native WebRTC video element has dimensions and advances.
