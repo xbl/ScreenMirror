@@ -35,6 +35,7 @@ export default {
     streaming: 'Streaming',
     disconnected: 'Connection lost',
     reconnect: 'Reconnect',
+    noFrames: 'No video — reconnect?',
   },
 };
 

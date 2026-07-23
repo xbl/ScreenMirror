@@ -35,5 +35,6 @@ export default {
     streaming: '正在传输',
     disconnected: '连接已断开',
     reconnect: '重新连接',
+    noFrames: '没有画面 — 重新连接?',
   },
 };
