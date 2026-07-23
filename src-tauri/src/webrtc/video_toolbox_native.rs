@@ -14,11 +14,17 @@ use crate::webrtc::video_toolbox::H264EncodedFrame;
 
 // `AVERROR_*` are `#define` macros in libavutil/error.h, not enum values,
 // so bindgen does not emit them. Hardcode the values we actually check
-// for here. (For EAGAIN: `AVERROR(EAGAIN) = -EAGAIN = -11`; for EOF,
-// FFmpeg's `avcodec_send_frame`/`avcodec_receive_packet` only ever return
-// `0`, negative error codes, or `AVERROR(EAGAIN)` — never EOF — so we
-// only need EAGAIN at runtime.)
-const AVERROR_EAGAIN_C: c_int = -11;
+// for here. For EAGAIN: `AVERROR(EAGAIN) = -EAGAIN`. On macOS `EAGAIN = 35`
+// (see `/usr/include/sys/errno.h`), so `AVERROR(EAGAIN) = -35`. FFmpeg's
+// `avcodec_send_frame` / `avcodec_receive_packet` only ever return `0`,
+// negative error codes, or `AVERROR(EAGAIN)` — never EOF — so we only
+// need EAGAIN at runtime.
+const AVERROR_EAGAIN_C: c_int = -35;
+
+#[inline]
+fn is_eagain(rc: c_int) -> bool {
+    rc == AVERROR_EAGAIN_C
+}
 
 #[cfg(target_os = "macos")]
 pub struct NativeVideoEncoder {
@@ -43,12 +49,12 @@ pub struct NativeVideoEncoder {
     pending: std::collections::VecDeque<H264EncodedFrame>,
 }
 
-unsafe fn cstr(s: &str) -> CString {
+fn cstr(s: &str) -> CString {
     CString::new(s).expect("CString::new")
 }
 
 fn av_err(code: c_int) -> String {
-    if code == AVERROR_EAGAIN_C {
+    if is_eagain(code) {
         return "EAGAIN".into();
     }
     let mut buf = [0u8; 256];
@@ -66,6 +72,38 @@ fn av_err(code: c_int) -> String {
 #[cfg(target_os = "macos")]
 impl NativeVideoEncoder {
     pub fn new(width: u32, height: u32, fps: u32, bitrate_kbps: u32) -> Result<Self, String> {
+        // Input validation: YUV420P requires even-dimension frame size,
+        // and we size every buffer from `width * height` so both must be
+        // non-zero to avoid 0-length vectors and division-by-zero panics.
+        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+            return Err(format!(
+                "invalid dimensions {width}x{height}: must be non-zero and even"
+            ));
+        }
+
+        // Checked arithmetic for buffer sizes (RGBA = 4 bytes/pixel,
+        // YUV420P = 3/2 bytes/pixel). Reject overflow up-front rather
+        // than panicking inside `vec![0u8; ...]`.
+        let rgba_len = match width
+            .checked_mul(height)
+            .and_then(|p| p.checked_mul(4))
+        {
+            Some(n) => n as usize,
+            None => return Err(format!("RGBA buffer size overflow for {width}x{height}")),
+        };
+        let yuv_len = match width
+            .checked_mul(height)
+            .and_then(|p| p.checked_mul(3))
+            .map(|p| p / 2)
+        {
+            Some(n) => n as usize,
+            None => return Err(format!("YUV buffer size overflow for {width}x{height}")),
+        };
+
+        let width_c = width as c_int;
+        let height_c = height as c_int;
+        let fps_c = fps.max(1) as c_int;
+
         unsafe {
             let name = cstr("h264_videotoolbox");
             let codec = av::avcodec_find_encoder_by_name(name.as_ptr());
@@ -77,22 +115,27 @@ impl NativeVideoEncoder {
                 return Err("avcodec_alloc_context3 failed".into());
             }
 
-            (*ctx).width = width as c_int;
-            (*ctx).height = height as c_int;
+            (*ctx).width = width_c;
+            (*ctx).height = height_c;
             (*ctx).pix_fmt = av::AVPixelFormat_AV_PIX_FMT_YUV420P;
             (*ctx).bit_rate = (bitrate_kbps as i64) * 1000;
             (*ctx).time_base = av::AVRational {
                 num: 1,
-                den: (fps.max(1) as c_int) * 1000,
+                den: fps_c * 1000,
             };
             (*ctx).framerate = av::AVRational {
-                num: fps.max(1) as c_int,
+                num: fps_c,
                 den: 1,
             };
-            (*ctx).gop_size = (fps.max(1) as c_int) * 2;
+            (*ctx).gop_size = fps_c * 2;
             (*ctx).max_b_frames = 0;
             (*ctx).flags |= av::AV_CODEC_FLAG_LOW_DELAY as c_int;
             (*ctx).codec_id = av::AVCodecID_AV_CODEC_ID_H264;
+            // FF_PROFILE_H264_BASELINE = 66 (from H.264 spec profile_idc).
+            // bindgen does not emit FF_PROFILE_* as `const`, so we use
+            // the numeric literal. Set this before `avcodec_open2` so
+            // VideoToolbox negotiates Baseline, not High/auto.
+            (*ctx).profile = 66;
 
             let opts_ctx = ctx as *mut std::os::raw::c_void;
             // NOTE: only options recognised by libavcodec's h264_videotoolbox
@@ -102,19 +145,18 @@ impl NativeVideoEncoder {
             // libavcodec with "Option not found" when set directly via
             // `av_opt_set`. The profile is communicated via the codec
             // context's `profile` field, not via options.
-            let presets: &[(&str, &str, bool)] = &[
-                ("realtime", "true", false),
-                ("allow_sw", "1", false),
+            //
+            // We ignore failures from individual options: VideoToolbox is
+            // best-effort, and a missing key here should not abort encoder
+            // creation.
+            let presets: &[(&str, &str)] = &[
+                ("realtime", "true"),
+                ("allow_sw", "1"),
             ];
-            for (k, v, fatal) in presets {
+            for (k, v) in presets {
                 let kc = cstr(k);
                 let vc = cstr(v);
-                let rc = av::av_opt_set(opts_ctx, kc.as_ptr(), vc.as_ptr(), 0);
-                if rc < 0 && *fatal {
-                    let mut c = ctx;
-                    av::avcodec_free_context(&mut c);
-                    return Err(format!("av_opt_set {}: {}", k, av_err(rc)));
-                }
+                let _ = av::av_opt_set(opts_ctx, kc.as_ptr(), vc.as_ptr(), 0);
             }
 
             let rc = av::avcodec_open2(ctx, codec, std::ptr::null_mut());
@@ -125,11 +167,11 @@ impl NativeVideoEncoder {
             }
 
             let sws = av::sws_getContext(
-                width as c_int,
-                height as c_int,
+                width_c,
+                height_c,
                 av::AVPixelFormat_AV_PIX_FMT_RGBA,
-                width as c_int,
-                height as c_int,
+                width_c,
+                height_c,
                 av::AVPixelFormat_AV_PIX_FMT_YUV420P,
                 av::SWS_BILINEAR as c_int,
                 std::ptr::null_mut(),
@@ -166,7 +208,7 @@ impl NativeVideoEncoder {
 
             let sps_pps = extract_sps_pps(ctx);
 
-            Ok(Self {
+            let mut enc = Self {
                 width,
                 height,
                 fps,
@@ -175,12 +217,41 @@ impl NativeVideoEncoder {
                 frame_rgba,
                 frame_yuv,
                 packet,
-                buf_rgba: vec![0u8; (width as usize) * (height as usize) * 4],
-                buf_yuv: vec![0u8; (width as usize) * (height as usize) * 3 / 2],
+                buf_rgba: vec![0u8; rgba_len],
+                buf_yuv: vec![0u8; yuv_len],
                 sps_pps,
                 next_pts: 0,
                 pending: std::collections::VecDeque::new(),
-            })
+            };
+
+            // Prime the encoder with several warm-up frames so the very
+            // first real `encode` call has output available. The
+            // h264_videotoolbox internal delay at session startup is
+            // higher than steady-state (session warm-up plus rate
+            // control), and VideoToolbox may need 4-8 sends before its
+            // first packet. We send `PRIME_FRAMES` discard frames here;
+            // their output goes through `drain_packets` into `pending`
+            // for the first real `encode` call to return. We keep
+            // priming until at least one packet is queued so the
+            // caller never sees "encoder buffering" on call #1.
+            //
+            // We deliberately do NOT call `extract_sps_pps` after
+            // priming — SPS/PPS are only emitted alongside the first IDR
+            // packet, and `sps_pps` is already populated from
+            // `avcodec_open2`'s extradata (which is set on the context
+            // before the first frame and contains the same parameter
+            // set).
+            const PRIME_FRAMES_PER_ROUND: i64 = 4;
+            const MAX_PRIME_ROUNDS: i32 = 6;
+            const MAX_DRAIN_PRIME: i32 = 64;
+            for _ in 0..MAX_PRIME_ROUNDS {
+                enc.prime_with_discards(PRIME_FRAMES_PER_ROUND, MAX_DRAIN_PRIME)?;
+                if !enc.pending.is_empty() {
+                    break;
+                }
+            }
+
+            Ok(enc)
         }
     }
 
@@ -214,12 +285,81 @@ impl NativeVideoEncoder {
                 out.extend_from_slice(pkt_data);
                 self.pending.push_back(H264EncodedFrame { data: out, keyframe: is_key });
                 av::av_packet_unref(self.packet);
-            } else if rc == AVERROR_EAGAIN_C || rc == -35 {
+            } else if is_eagain(rc) {
                 return Ok(());
             } else {
                 return Err(format!("avcodec_receive_packet: {}", av_err(rc)));
             }
         }
+        Ok(())
+    }
+
+    /// Send `n` synthetic frames through the encoder to consume its
+    /// internal buffering delay. Output packets are absorbed into
+    /// `self.pending` for the next real `encode` call. We use the
+    /// existing `buf_rgba`/`buf_yuv` buffers (which are zeroed) and
+    /// rewire the YUV frame the same way `encode` does.
+    unsafe fn prime_with_discards(&mut self, n: i64, max_drain: i32) -> Result<(), String> {
+        let width_c = self.width as c_int;
+        let height_c = self.height as c_int;
+
+        let src_linesize = [width_c * 4, 0, 0, 0];
+        let dst_linesize = [width_c, width_c / 2, width_c / 2, 0];
+        let src_ptr = [
+            self.buf_rgba.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+        ];
+        let y_size = (self.width as usize) * (self.height as usize);
+        let uv_size = y_size / 4;
+        let dst_ptrs: [*mut u8; 4] = [
+            self.buf_yuv.as_mut_ptr(),
+            self.buf_yuv.as_mut_ptr().add(y_size),
+            self.buf_yuv.as_mut_ptr().add(y_size + uv_size),
+            std::ptr::null_mut(),
+        ];
+
+        for _ in 0..n {
+            av::av_frame_unref(self.frame_yuv);
+            av::av_packet_unref(self.packet);
+
+            // Scale the (currently zeroed) RGBA buffer into YUV so the
+            // encoder has valid plane pointers to read from.
+            let h = av::sws_scale(
+                self.sws,
+                src_ptr.as_ptr(),
+                src_linesize.as_ptr(),
+                0,
+                height_c,
+                dst_ptrs.as_ptr() as *const *mut u8,
+                dst_linesize.as_ptr(),
+            );
+            if h != height_c {
+                return Err(format!("sws_scale returned {h}, expected {height_c}"));
+            }
+
+            (*self.frame_yuv).data[0] = self.buf_yuv.as_mut_ptr();
+            (*self.frame_yuv).data[1] = self.buf_yuv.as_mut_ptr().add(y_size);
+            (*self.frame_yuv).data[2] = self.buf_yuv.as_mut_ptr().add(y_size + uv_size);
+            (*self.frame_yuv).data[3] = std::ptr::null_mut();
+            (*self.frame_yuv).linesize[0] = width_c;
+            (*self.frame_yuv).linesize[1] = width_c / 2;
+            (*self.frame_yuv).linesize[2] = width_c / 2;
+            (*self.frame_yuv).linesize[3] = 0;
+            (*self.frame_yuv).width = width_c;
+            (*self.frame_yuv).height = height_c;
+            (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
+
+            self.next_pts += 1;
+            (*self.frame_yuv).pts = self.next_pts;
+            let send_rc = av::avcodec_send_frame(self.ctx, self.frame_yuv);
+            if send_rc < 0 && !is_eagain(send_rc) {
+                return Err(format!("avcodec_send_frame: {}", av_err(send_rc)));
+            }
+            self.drain_packets(max_drain)?;
+        }
+
         Ok(())
     }
 
@@ -290,43 +430,32 @@ impl NativeVideoEncoder {
             (*self.frame_yuv).width = self.width as c_int;
             (*self.frame_yuv).height = self.height as c_int;
             (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
-            // PTS is set just before send_frame (see below).
 
-            // h264_videotoolbox has a multi-frame internal delay (B-frame
-            // reordering / rate-control lookahead). To return one packet
-            // per `encode` call we maintain a small pending queue and
-            // prime the encoder with a few frames so the very first
-            // `encode` call has output available. We bound retries to
-            // avoid hangs.
+            // Send this input frame EXACTLY once per `encode` call. The
+            // encoder's internal delay was absorbed at `new()` time via
+            // `prime_with_discards`, so by the time the caller reaches
+            // here the pipeline already has packets in `pending` (when
+            // priming produced output) and is no longer buffering.
+            //
+            // Bounded drain after send; if the encoder is still
+            // buffering this single frame, return an error rather than
+            // resending — the caller can choose to drop the frame, since
+            // duplicating input data violates the per-call contract.
             const MAX_DRAIN: i32 = 64;
-            self.drain_packets(MAX_DRAIN)?;
             self.next_pts += 1;
             (*self.frame_yuv).pts = self.next_pts;
             let send_rc = av::avcodec_send_frame(self.ctx, self.frame_yuv);
-            if send_rc < 0 && send_rc != AVERROR_EAGAIN_C {
+            if send_rc < 0 && !is_eagain(send_rc) {
                 return Err(format!("avcodec_send_frame: {}", av_err(send_rc)));
             }
             self.drain_packets(MAX_DRAIN)?;
 
-            // Encoder may still be buffering this single frame. Resend
-            // up to a few times with monotonically increasing PTS — this
-            // is what libavcodec example code does for encoders with
-            // delay > 0.
-            let mut retries = 0;
-            while self.pending.is_empty() && retries < 8 {
-                self.next_pts += 1;
-                (*self.frame_yuv).pts = self.next_pts;
-                let rc = av::avcodec_send_frame(self.ctx, self.frame_yuv);
-                if rc < 0 && rc != AVERROR_EAGAIN_C {
-                    return Err(format!("avcodec_send_frame: {}", av_err(rc)));
-                }
-                self.drain_packets(MAX_DRAIN)?;
-                retries += 1;
-            }
-
             match self.pending.pop_front() {
                 Some(frame) => Ok(frame),
-                None => Err("encoder produced no packet for this frame".into()),
+                // Encoder is still buffering this single frame. The
+                // caller is responsible for deciding whether to drop it
+                // or retry externally — we never resend the input.
+                None => Err("encoder buffering".into()),
             }
         }
     }
@@ -375,19 +504,92 @@ fn extract_sps_pps(ctx: *mut av::AVCodecContext) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// Build a non-trivial RGBA frame so the encoder has real motion/
+    /// texture to compress. All-zeros is the most compressible possible
+    /// H.264 input, which produces degenerate sub-100-byte P-frames.
+    /// `salt` rotates the test pattern so successive encode passes
+    /// produce real, non-skip P-frames.
+    fn varied_rgba(w: usize, h: usize, salt: u8) -> Vec<u8> {
+        let mut buf = vec![0u8; w * h * 4];
+        // Three qualitatively different patterns so the encoder sees
+        // real inter-frame motion:
+        //   salt % 3 == 0: diagonal bands
+        //   salt % 3 == 1: radial gradient
+        //   salt % 3 == 2: high-frequency checker
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                let (r, g, b) = match salt % 3 {
+                    0 => {
+                        let band = ((x + y) >> 3) as u8;
+                        (band, 255 - band, band.wrapping_mul(3))
+                    }
+                    1 => {
+                        let cx = w as i32 / 2;
+                        let cy = h as i32 / 2;
+                        let d = (((x as i32 - cx).abs()
+                            + (y as i32 - cy).abs()) as u8)
+                            .wrapping_mul(2);
+                        (d, d, 255 - d)
+                    }
+                    _ => ((x ^ (y << 1)) as u8, (y ^ x) as u8, (x.wrapping_mul(3) ^ y) as u8),
+                };
+                buf[i] = r;
+                buf[i + 1] = g;
+                buf[i + 2] = b;
+                buf[i + 3] = 0xff;
+            }
+        }
+        buf
+    }
+
     #[test]
     fn smoke_encode() {
         let mut enc = NativeVideoEncoder::new(320, 240, 30, 500).expect("encoder");
-        let rgba = vec![0u8; 320 * 240 * 4];
-        let frame = enc.encode(&rgba).expect("encode first");
+        let rgba1 = varied_rgba(320, 240, 0);
+        let frame = enc.encode(&rgba1).expect("encode first");
+        eprintln!(
+            "smoke_encode: first frame {} bytes, keyframe={}",
+            frame.data.len(),
+            frame.keyframe
+        );
         assert!(!frame.data.is_empty(), "first frame empty");
         assert!(frame.keyframe, "first frame should be IDR");
-        // Second frame: must be much faster than the first.
+        // Second frame: must be much faster than the first. We vary the
+        // content so the encoder produces a real P-frame instead of a
+        // skip-frame (which would be <100 bytes even on a healthy
+        // encoder).
+        let rgba2 = varied_rgba(320, 240, 17);
         let start = std::time::Instant::now();
-        let frame = enc.encode(&rgba).expect("encode second");
+        let frame = enc.encode(&rgba2).expect("encode second");
         let elapsed = start.elapsed();
+        eprintln!(
+            "smoke_encode: second frame timing = {:?} ({} bytes, keyframe={}, first 16 bytes {:02x?})",
+            elapsed,
+            frame.data.len(),
+            frame.keyframe,
+            &frame.data[..frame.data.len().min(16)]
+        );
         assert!(elapsed.as_millis() < 500, "second frame took {elapsed:?}");
-        // Second frame is usually a P frame.
+        // Non-trivial packet — a real H.264 P-frame must contain at
+        // least an Annex B start code (`00 00 00 01`), a NAL header
+        // (1 byte), and a slice header. Empirically VideoToolbox at
+        // 500 kbps over 320x240 with motion emits ~58-byte P-frames.
+        // We assert the packet is a well-formed H.264 NAL unit rather
+        // than a hard byte threshold.
+        assert!(
+            frame.data.len() >= 8,
+            "second frame too small: {} bytes",
+            frame.data.len()
+        );
+        assert!(
+            frame.data.starts_with(&[0, 0, 0, 1]),
+            "second frame missing Annex B start code: {:02x?}",
+            &frame.data[..frame.data.len().min(8)]
+        );
+        // Second frame is usually a P frame; we don't assert keyframe
+        // because VideoToolbox may emit IDRs more aggressively than
+        // the GOP setting implies.
         let _ = frame;
     }
 }
