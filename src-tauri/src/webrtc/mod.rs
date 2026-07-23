@@ -145,38 +145,63 @@ pub fn spawn_video_capture_loop(
         interval
     );
     std::thread::spawn(move || {
-        let mut encoder: Option<VideoEncoder> = None;
+        let capture_started_at = std::time::Instant::now();
+        let mut encoder_slot: Option<std::sync::Mutex<Option<VideoEncoder>>> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             match capture_one(&target) {
                 Ok(frame) => {
                     let dimensions = (frame.rgba.width(), frame.rgba.height());
-                    if encoder.is_none() {
-                        match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1)) {
-                            Ok(value) => encoder = Some(value),
-                            Err(error) => {
-                                tracing::warn!("video encoder initialization failed: {error}");
-                                std::thread::sleep(interval);
-                                continue;
-                            }
-                        }
+                    let pixels = (dimensions.0 as u64) * (dimensions.1 as u64);
+                    let kbps = ((pixels * fps.max(1) as u64 * 6) / 1000 / 100)
+                        .max(500)
+                        .min(20000);
+                    if encoder_slot.is_none() {
+                        encoder_slot = Some(std::sync::Mutex::new(None));
                     }
-                    if let Some(value) = encoder.as_ref() {
-                        match value.encode(frame.rgba.as_raw()) {
-                            Ok(encoded) => {
-                                frames = frames.wrapping_add(1);
-                                if frames % 30 == 1 {
-                                    tracing::info!(
-                                        "video capture: encoded frame #{} ({} bytes, keyframe={})",
-                                        frames,
-                                        encoded.data.len(),
-                                        encoded.keyframe
-                                    );
+                    let result = {
+                        let mut guard = encoder_slot.as_mut().unwrap().lock().unwrap();
+                        if guard.is_none() {
+                            match VideoEncoder::new(
+                                dimensions.0,
+                                dimensions.1,
+                                fps.max(1),
+                                kbps as u32,
+                            ) {
+                                Ok(value) => *guard = Some(value),
+                                Err(error) => {
+                                    tracing::warn!("video encoder initialization failed: {error}");
+                                    drop(guard);
+                                    std::thread::sleep(interval);
+                                    continue;
                                 }
-                                sink(encoded);
                             }
-                            Err(error) => tracing::warn!("H.264 encode error: {error}"),
                         }
+                        guard.as_mut().unwrap().encode(frame.rgba.as_raw())
+                    };
+                    match result {
+                        Ok(encoded) => {
+                            frames = frames.wrapping_add(1);
+                            if frames <= 3 {
+                                tracing::info!(
+                                    "video capture: encoded frame #{} total_elapsed={:?} bytes={} keyframe={}",
+                                    frames,
+                                    capture_started_at.elapsed(),
+                                    encoded.data.len(),
+                                    encoded.keyframe,
+                                );
+                            }
+                            if frames % 30 == 1 {
+                                tracing::info!(
+                                    "video capture: encoded frame #{} ({} bytes, keyframe={})",
+                                    frames,
+                                    encoded.data.len(),
+                                    encoded.keyframe
+                                );
+                            }
+                            sink(encoded);
+                        }
+                        Err(error) => tracing::warn!("H.264 encode error: {error}"),
                     }
                 }
                 Err(error) => tracing::warn!("capture error: {error}"),
