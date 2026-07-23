@@ -1,5 +1,5 @@
 <template>
-  <header class="top-bar">
+  <header class="top-bar" data-tauri-drag-region>
     <div class="top-brand">
       <span class="top-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="20" height="20">
