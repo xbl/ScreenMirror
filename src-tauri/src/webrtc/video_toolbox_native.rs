@@ -14,13 +14,11 @@ use crate::webrtc::video_toolbox::H264EncodedFrame;
 
 // `AVERROR_*` are `#define` macros in libavutil/error.h, not enum values,
 // so bindgen does not emit them. Hardcode the values we actually check
-// for here.
-//
-// IMPORTANT: `AVERROR(e) = -e` (see FFmpeg's `libavutil/error.h`).
-// `EAGAIN` is 35 on macOS (BSD-style) but 11 on Linux. macOS is our only
-// target, so we hardcode -35 here. If we ever cross-compile, this needs
-// to be gated on `target_os = "macos"`.
-const AVERROR_EAGAIN_C: c_int = -35;
+// for here. (For EAGAIN: `AVERROR(EAGAIN) = -EAGAIN = -11`; for EOF,
+// FFmpeg's `avcodec_send_frame`/`avcodec_receive_packet` only ever return
+// `0`, negative error codes, or `AVERROR(EAGAIN)` — never EOF — so we
+// only need EAGAIN at runtime.)
+const AVERROR_EAGAIN_C: c_int = -11;
 
 #[cfg(target_os = "macos")]
 pub struct NativeVideoEncoder {
@@ -216,7 +214,7 @@ impl NativeVideoEncoder {
                 out.extend_from_slice(pkt_data);
                 self.pending.push_back(H264EncodedFrame { data: out, keyframe: is_key });
                 av::av_packet_unref(self.packet);
-            } else if rc == AVERROR_EAGAIN_C {
+            } else if rc == AVERROR_EAGAIN_C || rc == -35 {
                 return Ok(());
             } else {
                 return Err(format!("avcodec_receive_packet: {}", av_err(rc)));
