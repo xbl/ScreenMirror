@@ -27,7 +27,7 @@ fn main() {
         .allowlist_function("avcodec_open2")
         .allowlist_function("avcodec_send_frame")
         .allowlist_function("avcodec_receive_packet")
-        .allowlist_function("avcodec_alloc_frame")
+        .allowlist_function("av_frame_alloc")
         .allowlist_function("av_frame_free")
         .allowlist_function("av_frame_unref")
         .allowlist_function("av_packet_alloc")
