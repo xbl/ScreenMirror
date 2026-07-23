@@ -9,16 +9,24 @@
       @fullscreen="toggleFullscreen"
     />
     <video
-      v-show="status === 'streaming'"
+      v-if="status === 'streaming'"
       ref="videoEl"
       class="frame"
       autoplay
       playsinline
       muted
+      @loadedmetadata="onLoadedMetadata"
+      @error="onVideoError"
     />
 
     <div v-if="status !== 'streaming'" class="player-center">
-      <div v-if="status === 'disconnected'" class="player-disconnected" role="alert">
+      <div v-if="noFrames" class="player-disconnected" role="alert">
+        <p class="player-center-title">{{ t('player.noFrames') }}</p>
+        <button class="player-reconnect" type="button" @click="reconnect">
+          {{ t('player.reconnect') }}
+        </button>
+      </div>
+      <div v-else-if="status === 'disconnected'" class="player-disconnected" role="alert">
         <p class="player-center-title">{{ t('player.disconnected') }}</p>
         <button class="player-reconnect" type="button" @click="reconnect">
           {{ t('player.reconnect') }}
@@ -49,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import PlayerControlPanel from '../components/PlayerControlPanel.vue';
 import { useViewerStatus } from '../lib/viewerStatus';
@@ -60,6 +68,8 @@ const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
 const playing = ref(true);
 const quality = ref('100%');
 const videoEl = ref<HTMLVideoElement | null>(null);
+const pendingStream = ref<MediaStream | null>(null);
+const noFrames = ref(false);
 
 const statusText = computed(() => {
   if (status.value === 'streaming') return t('player.streaming');
@@ -75,7 +85,9 @@ const emit = defineEmits<{
 function togglePlay() {
   playing.value = !playing.value;
   if (!videoEl.value) return;
-  if (playing.value) void videoEl.value.play().catch(() => {});
+  if (playing.value) void videoEl.value.play().catch((err) => {
+    console.error('[player-view] play() rejected:', err);
+  });
   else videoEl.value.pause();
 }
 
@@ -89,19 +101,81 @@ function toggleFullscreen() {
   else void videoEl.value.requestFullscreen();
 }
 
+function attachStream(stream: MediaStream) {
+  const v = videoEl.value;
+  if (!v) {
+    pendingStream.value = stream;
+    return;
+  }
+  if (v.srcObject === stream) return;
+  v.srcObject = stream;
+  const playPromise = v.play();
+  if (playPromise && typeof playPromise.then === 'function') {
+    playPromise.catch((err) => {
+      console.error('[player-view] play() rejected:', err);
+    });
+  }
+  startFrameWatchdog();
+}
+
+function startFrameWatchdog() {
+  if (frameWatchdog !== undefined) window.clearTimeout(frameWatchdog);
+  frameWatchdog = window.setTimeout(() => {
+    frameWatchdog = undefined;
+    const v = videoEl.value;
+    if (!v) {
+      noFrames.value = true;
+      markDisconnected();
+      return;
+    }
+    if (v.videoWidth === 0 || v.videoHeight === 0) {
+      console.error('[player-view] no frames after 5s; videoWidth=0 videoHeight=0 readyState=' + v.readyState + ' networkState=' + v.networkState + ' error=' + (v.error ? v.error.code : 'none'));
+      noFrames.value = true;
+      markDisconnected();
+    }
+  }, 5000);
+}
+
+function onLoadedMetadata() {
+  if (frameWatchdog !== undefined) {
+    window.clearTimeout(frameWatchdog);
+    frameWatchdog = undefined;
+  }
+  noFrames.value = false;
+  console.log('[player-view] loadedmetadata videoWidth=' + (videoEl.value?.videoWidth ?? 0) + ' videoHeight=' + (videoEl.value?.videoHeight ?? 0));
+}
+
+function onVideoError(event: Event) {
+  const v = videoEl.value;
+  console.error('[player-view] <video> error:', event, v?.error);
+  noFrames.value = true;
+  markDisconnected();
+}
+
 function onStream(event: Event) {
   const stream = (event as CustomEvent<MediaStream>).detail;
-  if (!(stream instanceof MediaStream) || !videoEl.value) return;
-  videoEl.value.srcObject = stream;
-  void videoEl.value.play().catch(() => {});
+  if (!(stream instanceof MediaStream)) return;
+  for (const track of stream.getTracks()) {
+    if (track.readyState === 'ended') {
+      console.error('[player-view] track arrived ended:', track.kind, track.id);
+      noFrames.value = true;
+      markDisconnected();
+      return;
+    }
+    track.addEventListener('ended', () => {
+      console.warn('[player-view] track ended:', track.kind, track.id);
+      if (status.value === 'streaming') {
+        noFrames.value = true;
+        markDisconnected();
+      }
+    });
+  }
   (window as unknown as { __smVideoTrack?: boolean }).__smVideoTrack = true;
   markStreaming();
+  attachStream(stream);
 }
 
 function reconnect() {
-  // Full page reload is the simplest reliable way to re-establish both the
-  // signaling WebSocket and the RTCPeerConnection. Matches the existing
-  // 'reinitiate' button behavior in ConnectionPrompts.vue.
   window.location.reload();
 }
 
@@ -110,39 +184,40 @@ function scheduleDisconnected() {
   if (disconnectedTimer !== undefined) return;
   disconnectedTimer = window.setTimeout(() => {
     disconnectedTimer = undefined;
-    // Only flip if we never reached streaming (host went away during
-    // connect). If we *were* streaming, the pc.ontrack ended / ws close
-    // path keeps status at 'streaming' until the caller decides.
     if (status.value !== 'streaming') markDisconnected();
   }, 5000);
 }
 
-// Streaming-only: if the RTCPeerConnection fails mid-session (e.g. host
-// stops sharing), flip to disconnected immediately. This complements
-// scheduleDisconnected, which only covers the pre-stream case.
+let frameWatchdog: number | undefined;
 let pcRef: RTCPeerConnection | null = null;
 function onPcFailure() {
-  if (!pcRef) return;
-  const s = pcRef.connectionState ?? pcRef.iceConnectionState ?? '';
+  const pc = pcRef;
+  if (!pc) return;
+  const s = pc.connectionState ?? pc.iceConnectionState ?? '';
   if (s === 'disconnected' || s === 'failed' || s === 'closed') {
     if (status.value === 'streaming') markDisconnected();
   }
 }
 
+watch(
+  [videoEl, pendingStream, () => status.value === 'streaming'],
+  ([el, stream, isStreaming]) => {
+    if (!isStreaming) return;
+    if (!el || !stream) return;
+    attachStream(stream);
+    pendingStream.value = null;
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   status.value = 'connecting';
   window.addEventListener('viewer-stream', onStream);
-  // If the signaling socket closes before media arrives, surface that
-  // to the viewer with a short delay so we don't flash disconnected on
-  // transient reconnects.
   const ws = (window as unknown as { __smDebugWs?: WebSocket }).__smDebugWs;
   if (ws) {
     ws.addEventListener('close', scheduleDisconnected);
     ws.addEventListener('error', scheduleDisconnected);
   }
-  // If the RTCPeerConnection drops mid-stream, surface disconnected
-  // immediately (no 5s grace period) so the viewer doesn't sit on a
-  // frozen frame.
   const pc = (window as unknown as { __smPc?: RTCPeerConnection }).__smPc;
   if (pc) {
     pcRef = pc;
@@ -156,12 +231,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;
   if (disconnectedTimer !== undefined) window.clearTimeout(disconnectedTimer);
+  if (frameWatchdog !== undefined) window.clearTimeout(frameWatchdog);
   if (pcRef) {
     pcRef.removeEventListener('iceconnectionstatechange', onPcFailure);
     pcRef.removeEventListener('connectionstatechange', onPcFailure);
     pcRef = null;
   }
-  // reset is exported so callers / tests can drive transitions if needed.
   void reset;
 });
 </script>
