@@ -69,10 +69,10 @@ pub fn run() {
     // when SCREENMIRROR_CAPTURE=screen|window is set.
     if let Ok(kind) = std::env::var("SCREENMIRROR_CAPTURE") {
         let target = crate::webrtc::CaptureTarget {
-            kind: if kind == "window" {
-                crate::webrtc::CaptureKind::Window
-            } else {
-                crate::webrtc::CaptureKind::Screen
+            kind: match kind.as_str() {
+                "window" => crate::webrtc::CaptureKind::Window,
+                "test" | "testpattern" => crate::webrtc::CaptureKind::TestPattern,
+                _ => crate::webrtc::CaptureKind::Screen,
             },
             id: 0,
             quality: std::env::var("SCREENMIRROR_CAPTURE_QUALITY")
@@ -93,6 +93,8 @@ pub fn run() {
             commands::get_lan_ip,
             commands::check_wifi_connection,
             commands::check_screen_recording_permission,
+            commands::request_screen_recording_permission,
+            commands::open_screen_recording_settings,
             commands::get_port,
             commands::get_app_language,
             commands::set_app_language,

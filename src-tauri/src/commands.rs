@@ -36,6 +36,16 @@ pub fn check_screen_recording_permission() -> bool {
 }
 
 #[tauri::command]
+pub fn request_screen_recording_permission() -> bool {
+    permissions::request_screen_recording_permission()
+}
+
+#[tauri::command]
+pub fn open_screen_recording_settings() -> Result<(), String> {
+    permissions::open_screen_recording_settings()
+}
+
+#[tauri::command]
 pub fn get_port(state: State<'_, CommandState>) -> u16 {
     *state.port.lock()
 }
@@ -211,6 +221,7 @@ pub fn set_capture_target(
     let kind = match args.kind.as_str() {
         "screen" => crate::webrtc::CaptureKind::Screen,
         "window" => crate::webrtc::CaptureKind::Window,
+        "test" | "testpattern" => crate::webrtc::CaptureKind::TestPattern,
         _ => return Err(format!("unknown kind {}", args.kind)),
     };
     *state.capture_target.lock() = Some(crate::webrtc::CaptureTarget {
