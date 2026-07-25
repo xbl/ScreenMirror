@@ -55,12 +55,13 @@
       @close="showSettings = false"
       @reset="onReset"
     />
-    <ScreenRecordingPermissionModal />
+    <ScreenRecordingPermissionModal ref="permissionModal" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, provide, onMounted, onBeforeUnmount } from 'vue';
+import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
 import { useI18n } from 'vue-i18n';
 import TopBar from './TopBar.vue';
 import QRCard from './QRCard.vue';
@@ -78,6 +79,8 @@ const showSettings = ref(false);
 const sharing = ref(false);
 const viewerCount = ref(0);
 const pendingDevice = ref<Device | null>(null);
+const permissionModal: ProvidedPermissionModal = ref(null);
+provide(PermissionModalKey, permissionModal);
 
 let poll: number | undefined;
 

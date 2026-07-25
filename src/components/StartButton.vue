@@ -25,9 +25,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '../utils/api';
+import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
 
 const props = defineProps<{
   sharing: boolean;
@@ -41,6 +42,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
+const permissionModal = inject<ProvidedPermissionModal>(
+  PermissionModalKey,
+  // Safe fallback when the host doesn't provide a modal.
+  { value: null } as ProvidedPermissionModal,
+);
+
 const viewerLabel = computed(() => {
   const n = props.viewerCount;
   if (n <= 0) return '';
@@ -49,6 +56,15 @@ const viewerLabel = computed(() => {
 });
 
 async function onStart() {
+  try {
+    const ok = await api.checkScreenRecordingPermission();
+    if (!ok) {
+      await permissionModal.value?.checkAndShow();
+      return;
+    }
+  } catch {
+    /* outside Tauri: tolerate and continue */
+  }
   try {
     await api.startSharing();
     emit('update:sharing', true);

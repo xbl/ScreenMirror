@@ -37,14 +37,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, inject, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '../utils/api';
+import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
 
 const { t } = useI18n();
 const source = ref<'screen' | 'window'>('screen');
 
+const permissionModal = inject<ProvidedPermissionModal>(
+  PermissionModalKey,
+  // Safe fallback when the host doesn't provide a modal (e.g. tests, storybook).
+  ref(null) as ProvidedPermissionModal,
+);
+
 async function onChange() {
+  // Gate: xcap enumeration will silently return incomplete data when
+  // Screen Recording permission is denied. Surface the modal instead.
+  try {
+    const ok = await api.checkScreenRecordingPermission();
+    if (!ok) {
+      await permissionModal.value?.checkAndShow();
+      return;
+    }
+  } catch {
+    /* outside Tauri: tolerate and continue */
+  }
   try {
     const sources = await api.enumerateCaptureSources();
     const first = sources.find((s) => s.kind === source.value);

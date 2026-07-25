@@ -50,10 +50,12 @@ export default {
   },
   permission: {
     title: '需要屏幕录制权限',
-    message: 'Screenmirror 在 macOS 上需要屏幕录制权限才能分享屏幕。',
+    body: 'macOS 不会再次自动弹出权限请求。请在系统设置中授予屏幕录制权限后再分享屏幕。',
+    step1: '点击「打开系统设置」',
+    step2: '在「隐私与安全性 → 屏幕录制」中勾选本应用',
+    step3: '返回此窗口并点击「重新检测权限」',
     openSettings: '打开系统设置',
-    restart: '重启应用',
-    restartReminder: '授予权限后请重启应用。',
+    recheck: '重新检测权限',
   },
   offline: {
     title: '无网络连接',

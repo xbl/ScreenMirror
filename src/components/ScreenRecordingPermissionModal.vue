@@ -1,16 +1,30 @@
 <template>
   <Teleport to="body">
-    <div v-if="show" class="pm-backdrop">
+    <div v-if="show" class="pm-backdrop" @keydown.esc="show = false">
       <div class="pm-card" role="alertdialog" :aria-label="t('permission.title')">
         <span class="pm-eyebrow">{{ t('permission.title') }}</span>
-        <p class="pm-message">{{ t('permission.message') }}</p>
-        <p class="pm-reminder">{{ t('permission.restartReminder') }}</p>
+        <p class="pm-message">{{ t('permission.body') }}</p>
+        <ol class="pm-steps">
+          <li>{{ t('permission.step1') }}</li>
+          <li>{{ t('permission.step2') }}</li>
+          <li>{{ t('permission.step3') }}</li>
+        </ol>
         <div class="pm-actions">
-          <button class="btn btn-ghost" @click="openSettings">
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="opening"
+            @click="openSettings"
+          >
             {{ t('permission.openSettings') }}
           </button>
-          <button class="btn btn-accent" @click="relaunchApp">
-            {{ t('permission.restart') }}
+          <button
+            class="btn btn-accent"
+            type="button"
+            :disabled="rechecking"
+            @click="recheck"
+          >
+            {{ t('permission.recheck') }}
           </button>
         </div>
       </div>
@@ -19,44 +33,67 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '../utils/api';
-import { relaunch } from '@tauri-apps/plugin-process';
 
 const { t } = useI18n();
 const show = ref(false);
+const opening = ref(false);
+const rechecking = ref(false);
 
-onMounted(async () => {
+async function checkAndShow(): Promise<void> {
   try {
     const ok = await api.checkScreenRecordingPermission();
     show.value = !ok;
   } catch {
-    /* running outside Tauri — leave hidden */
-  }
-});
-
-async function openSettings() {
-  try {
-    await api.openExternalLink(
-      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
-    );
-  } catch {
-    /* ignore */
+    // running outside Tauri; leave hidden
   }
 }
 
-async function relaunchApp() {
+async function openSettings(): Promise<void> {
+  opening.value = true;
   try {
-    await relaunch();
-  } catch {
+    await api.openScreenRecordingSettings();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('failed to open System Settings:', e);
+  } finally {
+    opening.value = false;
+  }
+}
+
+async function recheck(): Promise<void> {
+  rechecking.value = true;
+  try {
+    // Best-effort state-machine nudge. We don't depend on it showing a prompt;
+    // the real status comes from the next check.
     try {
-      await api.relaunchApp();
+      await api.requestScreenRecordingPermission();
     } catch {
       /* ignore */
     }
+    const ok = await api.checkScreenRecordingPermission();
+    if (ok) show.value = false;
+  } finally {
+    rechecking.value = false;
   }
 }
+
+onMounted(() => {
+  void checkAndShow();
+  window.addEventListener('keydown', onKey);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey);
+});
+
+function onKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && show.value) show.value = false;
+}
+
+defineExpose({ checkAndShow });
 </script>
 
 <style scoped>
@@ -99,13 +136,17 @@ async function relaunchApp() {
   color: var(--text-strong);
 }
 
-.pm-reminder {
+.pm-steps {
   font-size: var(--fs-13);
   color: var(--muted);
-  padding: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg);
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
 
 .pm-actions {
@@ -127,14 +168,20 @@ async function relaunchApp() {
   transition:
     background var(--motion) ease,
     color var(--motion) ease,
-    border-color var(--motion) ease;
+    border-color var(--motion) ease,
+    opacity var(--motion) ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-accent {
   background: var(--accent);
   color: #0a1413;
 }
-.btn-accent:hover {
+.btn-accent:hover:not(:disabled) {
   background: var(--accent-strong);
 }
 
@@ -143,7 +190,7 @@ async function relaunchApp() {
   color: var(--text);
   background: transparent;
 }
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
 }
 </style>

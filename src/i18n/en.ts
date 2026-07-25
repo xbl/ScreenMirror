@@ -49,12 +49,14 @@ export default {
     close: 'Close',
   },
   permission: {
-    title: 'Screen recording permission required',
-    message:
-      'Screenmirror needs screen recording access on macOS to share your screen.',
+    title: 'Screen Recording Permission Required',
+    body:
+      'macOS no longer shows the permission prompt automatically. Please grant Screen Recording access in System Settings to share your screen.',
+    step1: 'Click "Open System Settings"',
+    step2: 'Enable Screen Recording for this app in Privacy & Security',
+    step3: 'Return to this window and click "Re-check Permission"',
     openSettings: 'Open System Settings',
-    restart: 'Restart app',
-    restartReminder: 'After granting access, restart the app.',
+    recheck: 'Re-check Permission',
   },
   offline: {
     title: 'No network connection',
