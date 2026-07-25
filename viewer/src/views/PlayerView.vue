@@ -171,8 +171,15 @@ function onStream(event: Event) {
     });
   }
   (window as unknown as { __smVideoTrack?: boolean }).__smVideoTrack = true;
+  // Cache the stream FIRST, then flip status. Do NOT call attachStream here:
+  // it would run while <video> is still unmounted (or mounted under the OLD
+  // v-if branch) and either no-op into pendingStream (losing the race against
+  // the watcher) or set srcObject on an element about to be torn down by the
+  // v-if transition — which causes play() to reject with AbortError and the
+  // next <video> mount never receives the stream. The watcher below is the
+  // single source of truth for attachment.
+  pendingStream.value = stream;
   markStreaming();
-  attachStream(stream);
 }
 
 function reconnect() {
@@ -207,7 +214,15 @@ watch(
     attachStream(stream);
     pendingStream.value = null;
   },
-  { immediate: true },
+  // flush: 'post' guarantees the watcher runs AFTER Vue patches the DOM,
+  // so videoEl.value points at the freshly-mounted <video> (not the one
+  // that is about to be unmounted by a v-if transition). This eliminates
+  // the race where attachStream runs against an element that gets torn
+  // down before play() resolves, which manifested as
+  //   [player-view] play() rejected: AbortError
+  // followed 5s later by
+  //   [player-view] no frames after 5s; videoWidth=0
+  { immediate: true, flush: 'post' },
 );
 
 onMounted(() => {
