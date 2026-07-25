@@ -271,13 +271,39 @@ async function main() {
     // Video: verify a native WebRTC video element has dimensions and advances.
     const framesState = await page.evaluate(async () => {
       const video = document.querySelector('video.frame');
-      if (!(video instanceof HTMLVideoElement)) return { videoWidth: 0, videoHeight: 0, readyState: 0, currentTime: 0 };
+      if (!(video instanceof HTMLVideoElement)) {
+        // Element is gone — either still mounting or already torn down. Probe
+        // globals so we know what the stream looked like before unmount.
+        return {
+          videoWidth: 0,
+          videoHeight: 0,
+          readyState: 0,
+          currentTime: 0,
+          videoEl: false,
+          smVideoTrack: window.__smVideoTrack === true,
+        };
+      }
+      const stream = video.srcObject;
+      const tracks = stream instanceof MediaStream ? stream.getTracks().map(t => ({
+        kind: t.kind, id: t.id, label: t.label, muted: t.muted,
+        enabled: t.enabled, readyState: t.readyState,
+      })) : null;
       const before = video.currentTime;
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      return { videoWidth: video.videoWidth, videoHeight: video.videoHeight, readyState: video.readyState, currentTime: video.currentTime - before };
+      return {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        currentTime: video.currentTime - before,
+        videoEl: true,
+        networkState: video.networkState,
+        error: video.error ? { code: video.error.code, message: video.error.message } : null,
+        tracks,
+        trackCount: tracks?.length ?? 0,
+      };
     });
     const okFrames = framesState.videoWidth > 0 && framesState.videoHeight > 0 && framesState.readyState >= 2 && framesState.currentTime > 0;
-    record('frames', okFrames, `video ${framesState.videoWidth}x${framesState.videoHeight}, readyState=${framesState.readyState}, timeDelta=${framesState.currentTime.toFixed(3)}s`);
+    record('frames', okFrames, `video ${framesState.videoWidth}x${framesState.videoHeight}, readyState=${framesState.readyState}, timeDelta=${framesState.currentTime.toFixed(3)}s, networkState=${framesState.networkState ?? '?'}, error=${framesState.error ? framesState.error.code : 'none'}, tracks=${framesState.trackCount ?? 0}, videoEl=${framesState.videoEl}, smTrack=${framesState.smVideoTrack}`);
 
     // Latency: retain ISO timestamp parsing as a fallback/supplementary
     // measurement for both verbose and sparse encoded-frame log lines.

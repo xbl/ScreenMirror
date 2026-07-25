@@ -8,3 +8,4 @@ viewer/dist
 viewer/node_modules
 .DS_Store
 *.log
+tools/output

@@ -51,3 +51,10 @@ reqwest = { version = "0.12", features = ["json"] }
 [[bin]]
 name = "screenmirror-server"
 path = "src/bin/screenmirror-server.rs"
+
+# Local vendor of str0m with a patch to H264Packetizer: SPS and PPS are emitted
+# as their own single-NALU RTP packets and never bundled via STAP-A. RFC 6184
+# forbids STAP-A when packetization-mode=1 is negotiated, and Chrome silently
+# drops the entire IDR frame in that case, leaving the viewer with videoWidth=0.
+[patch.crates-io]
+str0m = { path = "vendor/str0m" }

@@ -496,7 +496,12 @@ fn extract_sps_pps(ctx: *mut av::AVCodecContext) -> Vec<u8> {
         if extradata.is_null() || size <= 0 {
             return Vec::new();
         }
-        std::slice::from_raw_parts(extradata, size as usize).to_vec()
+        let raw = std::slice::from_raw_parts(extradata, size as usize);
+        // libavcodec extradata may be AVCC or Annex B depending on the
+        // encoder backend and flags. str0m's H264Packetizer only walks for
+        // Annex B start codes, so normalize here. See
+        // `normalize_h264_extradata_to_annex_b` for the conversion rules.
+        crate::webrtc::video_toolbox::normalize_h264_extradata_to_annex_b(raw)
     }
 }
 

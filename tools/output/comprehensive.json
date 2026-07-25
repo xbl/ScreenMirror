@@ -1,38 +1,55 @@
 {
-  "ts": "2026-07-22T00:00:00.000Z",
+  "ts": "2026-07-23T22:31:46.752Z",
   "results": {
     "qr": {
       "ok": true,
-      "detail": "URL=http://192.168.43.61:3131/e2e-modules, qr-png-bytes=2111"
+      "detail": "URL=http://192.168.0.102:3131/e2e-modules, qr-png-bytes=2054"
     },
     "tray": {
       "ok": true,
-      "detail": "tray icon installed log emitted during setup"
+      "detail": "log line \"tray icon installed\" emitted during setup"
     },
     "room": {
       "ok": true,
       "detail": "smoke room e2e-modules registered at startup"
     },
     "approval": {
-      "ok": true,
-      "detail": "viewer reached player view"
+      "ok": false,
+      "detail": "viewer reached player view (body excerpt: \"没有画面 — 重新连接?\\n\\n重新连接\\n连接已断开\\n我的设备信息\\n设备类型: browser\\n设备 IP: 192.168.0.102\\n浏览器: Safari/537.36\\n系统: MacIntel\\n连接 ID: e2e-modules\\n\\n请确认该 IP 与主机应用中显示的一致。\\n\\n隐私\")"
     },
     "controls": {
-      "ok": true,
-      "detail": "pause=true quality-select=true fullscreen=true btnCount=3"
+      "ok": false,
+      "detail": "pause=false quality-select=false fullscreen=false btnCount=2"
     },
     "privacy": {
       "ok": true,
-      "detail": "no external tracking resources detected"
+      "detail": "no external tracking resources (external=false, html-bytes=1987)"
     },
     "frames": {
       "ok": false,
-      "detail": "native video track was not ready in the recorded headless run"
+      "detail": "video 0x0, readyState=0, timeDelta=0.000s, networkState=?, error=none, tracks=0, videoEl=false, smTrack=true"
     },
+    "firstEncodedFrameMs": {
+      "ok": false,
+      "detail": "firstEncodedFrameMs=0 verboseFrames=0 timestampFrames=0"
+    },
+    "avgEncodedFrameMs": {
+      "ok": false,
+      "detail": "avgEncodedFrameMs=0.0 verboseFrames=0 timestampFrames=0"
+    },
+    "viewerStatusPill": {
+      "ok": false,
+      "detail": "pill=true state=disconnected text=\"连接已断开\""
+    },
+    "viewerSpinner": {
+      "ok": false,
+      "detail": "spinner=false (note: spinner unmounts once streaming)"
+    },
+    "rebrand": null,
     "visual": {
       "ok": true,
-      "detail": "host and viewer pages rendered with a non-transparent background"
+      "detail": "body=rgb(14, 17, 22), #app=rgb(14, 17, 22), html-bytes=1987, sheets=1"
     }
   },
-  "qrUrl": "http://192.168.43.61:3131/e2e-modules"
+  "qrUrl": "http://192.168.0.102:3131/e2e-modules"
 }

@@ -15,6 +15,46 @@ use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 
 use crate::webrtc::{spawn_video_capture_loop, CaptureTarget, H264EncodedFrame, VideoFrameSink};
 
+/// Rewrite H.264 fmtp lines in an SDP so that `packetization-mode=<n>` is set
+/// to the requested value. Only H.264 payload-type fmtp lines are affected;
+/// lines that already have the requested value are left untouched, and lines
+/// for non-H.264 codecs (rtx, VP8, VP9, AV1, H265, opus, etc.) are not modified.
+/// Line endings (`\r\n` per RFC 4566) are preserved.
+fn rewrite_h264_packetization_mode(sdp: &str, target_mode: u8) -> String {
+    let mut out = String::with_capacity(sdp.len());
+    for line in sdp.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        let body = body.strip_suffix('\r').unwrap_or(body);
+        let line_ending = if line.ends_with("\r\n") { "\r\n" } else { "\n" };
+        if let Some(rest) = body.strip_prefix("a=fmtp:") {
+            if rest.split_whitespace().next().is_some() {
+                if body.contains("packetization-mode=") {
+                    let mut rewritten = String::new();
+                    let mut tokens = body.split(';');
+                    if let Some(first) = tokens.next() {
+                        rewritten.push_str(first);
+                    }
+                    for token in tokens {
+                        if token.trim_start().starts_with("packetization-mode=") {
+                            rewritten.push_str(";packetization-mode=");
+                            rewritten.push_str(&target_mode.to_string());
+                        } else {
+                            rewritten.push(';');
+                            rewritten.push_str(token);
+                        }
+                    }
+                    out.push_str(&rewritten);
+                    out.push_str(line_ending);
+                    continue;
+                }
+            }
+        }
+        out.push_str(body);
+        out.push_str(line_ending);
+    }
+    out
+}
+
 pub struct HostPeer {
     pub rtc: Arc<Mutex<Option<Rtc>>>,
     pub socket: Arc<Mutex<Option<UdpSocket>>>,
@@ -72,7 +112,21 @@ impl HostPeer {
             .sdp_api()
             .accept_offer(sdp_offer)
             .map_err(|e| format!("accept offer: {e}"))?;
-        Ok(answer.to_sdp_string())
+        let mut sdp = answer.to_sdp_string();
+        // str0m's H264 packetizer unconditionally emits STAP-A NALUs to ship
+        // SPS/PPS alongside the first IDR, regardless of the negotiated
+        // packetization-mode. RFC 6184 forbids STAP-A when mode=1, and Chrome
+        // silently discards the entire IDR frame as a result, leaving the
+        // viewer with videoWidth=0. Rewriting the answer SDP to mode=0 lets
+        // Chrome accept the STAP-A and decode the IDR.
+        let rewritten = rewrite_h264_packetization_mode(&sdp, 0);
+        tracing::info!(
+            "rewrote H264 packetization-mode=1 -> 0 in answer SDP ({} bytes, delta={})",
+            rewritten.len(),
+            rewritten.len() as i64 - sdp.len() as i64
+        );
+        sdp = rewritten;
+        Ok(sdp)
     }
 
     pub fn add_remote_candidate(&self, candidate: str0m::Candidate) -> Result<(), String> {
@@ -202,52 +256,71 @@ impl HostPeer {
                         let mut guard = rtc_arc.lock();
                         if let Some(rtc) = guard.as_mut() {
                             if let Some(writer) = rtc.writer(mid) {
-                                if let Some(params) = writer.payload_params().first() {
-                                    let pt = params.pt();
-                                    if let Err(error) = writer.write(
-                                        pt,
-                                        now,
-                                        MediaTime::new(timestamp, 90_000),
-                                        frame.data,
-                                    ) {
-                                        tracing::warn!("host: H.264 writer failed: {error}");
-                                    }
-                                    timestamp = timestamp.wrapping_add(timestamp_step);
-                                    // Drive packetization and pacing for the sample we
-                                    // just queued. str0m holds onto the sample in
-                                    // `to_payload` until we feed it Input::Timeout.
-                                    if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
+                                // Find the H.264 PayloadParams. payload_params() returns
+                                // every configured PT (opus, vp8, vp9, h264, ...) so we
+                                // can't just take .first(); the first one is opus PT 111
+                                // by default, which would silently drop every H.264 frame.
+                                let h264_pt = writer.payload_params().iter().find(|p| {
+                                    matches!(
+                                        p.spec().codec,
+                                        str0m::format::Codec::H264
+                                    )
+                                });
+                                let pt = match h264_pt {
+                                    Some(p) => p.pt(),
+                                    None => {
                                         tracing::warn!(
-                                            "host: failed to flush timeout after write: {error}"
+                                            "host: no H264 PT in payload_params for mid={:?}",
+                                            mid
                                         );
+                                        continue;
                                     }
-                                    // Drain any pending transmits/media events immediately
-                                    // instead of waiting for the next outer poll_output
-                                    // iteration, otherwise pacing pushes them out later and
-                                    // the viewer stays black until enough frames are queued.
-                                    loop {
-                                        let drained = {
-                                            let mut guard = rtc_arc.lock();
-                                            let Some(rtc) = guard.as_mut() else {
-                                                break;
-                                            };
-                                            rtc.poll_output()
+                                };
+                                if let Err(error) = writer.write(
+                                    pt,
+                                    now,
+                                    MediaTime::new(timestamp, 90_000),
+                                    frame.data,
+                                ) {
+                                    tracing::warn!("host: H.264 writer failed: {error}");
+                                }
+                                timestamp = timestamp.wrapping_add(timestamp_step);
+                                // Drive packetization and pacing for the sample we
+                                // just queued. str0m holds onto the sample in
+                                // `to_payload` until we feed it Input::Timeout.
+                                if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
+                                    tracing::warn!(
+                                        "host: failed to flush timeout after write: {error}"
+                                    );
+                                }
+                                // Drain any pending transmits/media events immediately
+                                // instead of waiting for the next outer poll_output
+                                // iteration, otherwise pacing pushes them out later and
+                                // the viewer stays black until enough frames are queued.
+                                loop {
+                                    let drained = {
+                                        // Reuse the existing guard rather than re-locking
+                                        // (deadlocks the same-thread mutex otherwise).
+                                        let rtc = match guard.as_mut() {
+                                            Some(rtc) => rtc,
+                                            None => break,
                                         };
-                                        match drained {
-                                            Ok(Output::Transmit(packet)) => {
-                                                let _ = socket.send_to(
-                                                    &packet.contents,
-                                                    packet.destination,
-                                                );
-                                            }
-                                            Ok(Output::Timeout(_)) => break,
-                                            Ok(Output::Event(_)) => {}
-                                            Err(error) => {
-                                                tracing::warn!(
-                                                    "host: post-write poll error: {error}"
-                                                );
-                                                break;
-                                            }
+                                        rtc.poll_output()
+                                    };
+                                    match drained {
+                                        Ok(Output::Transmit(packet)) => {
+                                            let _ = socket.send_to(
+                                                &packet.contents,
+                                                packet.destination,
+                                            );
+                                        }
+                                        Ok(Output::Timeout(_)) => break,
+                                        Ok(Output::Event(_)) => {}
+                                        Err(error) => {
+                                            tracing::warn!(
+                                                "host: post-write poll error: {error}"
+                                            );
+                                            break;
                                         }
                                     }
                                 }

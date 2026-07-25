@@ -16,6 +16,10 @@ pub use video_toolbox::{H264EncodedFrame, VideoEncoder};
 pub enum CaptureKind {
     Screen,
     Window,
+    /// Synthetic moving gradient. Used by the E2E harness in environments
+    /// without a real display so the host pipeline (encode + RTP + ICE + STAP-A)
+    /// can be exercised end-to-end without xcap.
+    TestPattern,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -83,6 +87,10 @@ pub struct CapturedFrame {
 }
 
 pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
+    capture_one_at(target, 0)
+}
+
+pub fn capture_one_at(target: &CaptureTarget, frame_index: u32) -> Result<CapturedFrame, String> {
     #[cfg(target_os = "macos")]
     {
         use xcap::{Monitor, Window};
@@ -101,6 +109,7 @@ pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
                 .ok_or_else(|| format!("window index {} out of range", target.id))?
                 .capture_image()
                 .map_err(|e| e.to_string())?,
+            CaptureKind::TestPattern => render_test_pattern(target.id.wrapping_add(frame_index)),
         };
         let (w, h) = (img.width(), img.height());
         let rgba = RgbaImage::from_raw(w, h, img.into_raw())
@@ -128,6 +137,60 @@ pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
     }
 }
 
+/// Render a 320x180 RGBA frame with a moving radial gradient. Encoded by the
+/// VideoToolbox encoder, the gradient provides enough spatial variation for the
+/// H.264 codec to produce non-trivial keyframes. Deterministic per-frame-id so
+/// the same input produces the same encoded output.
+fn render_test_pattern(seed: u32) -> image::RgbaImage {
+    // 320x180 animated pattern with LARGE flat-color quadrants so VideoToolbox
+    // can encode keyframes quickly (~10-50ms instead of seconds), plus a
+    // moving bright square so successive frames differ. Every quadrant has
+    // a distinct, fully-saturated, non-black colour so the decoded frame
+    // is visibly non-black under any compression setting.
+    let w: u32 = 320;
+    let h: u32 = 180;
+    let mut buf = image::RgbaImage::new(w, h);
+    // Background: four solid quadrants — bright and obviously non-black.
+    for y in 0..h {
+        for x in 0..w {
+            let r: u8 = if x < w / 2 { 220 } else { 32 };
+            let g: u8 = if y < h / 2 { 220 } else { 32 };
+            let b: u8 = 96;
+            buf.put_pixel(x, y, image::Rgba([r, g, b, 255]));
+        }
+    }
+    // Overlay: a 40x40 white square that moves around so each frame differs
+    // and the viewer always sees motion. seed is the frame index from
+    // spawn_video_capture_loop, so the position animates over time.
+    let t = (seed % 360) as f32;
+    let cx = (w as f32 / 2.0 + 100.0 * (t * 0.01745).cos()) as i32;
+    let cy = (h as f32 / 2.0 + 60.0 * (t * 0.01745).sin()) as i32;
+    let sq = 40;
+    for dy in 0..sq {
+        for dx in 0..sq {
+            let px = cx + dx - sq / 2;
+            let py = cy + dy - sq / 2;
+            if px >= 0 && py >= 0 && (px as u32) < w && (py as u32) < h {
+                buf.put_pixel(px as u32, py as u32, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+    }
+    // Border: 2px bright yellow so the frame edges are obviously visible.
+    for x in 0..w {
+        for t in 0..2 {
+            buf.put_pixel(x, t, image::Rgba([255, 255, 0, 255]));
+            buf.put_pixel(x, h - 1 - t, image::Rgba([255, 255, 0, 255]));
+        }
+    }
+    for y in 0..h {
+        for t in 0..2 {
+            buf.put_pixel(t, y, image::Rgba([255, 255, 0, 255]));
+            buf.put_pixel(w - 1 - t, y, image::Rgba([255, 255, 0, 255]));
+        }
+    }
+    buf
+}
+
 pub type VideoFrameSink = Arc<dyn Fn(H264EncodedFrame) + Send + Sync + 'static>;
 
 /// Capture RGBA frames, encode them with VideoToolbox, and deliver H.264 samples.
@@ -149,7 +212,8 @@ pub fn spawn_video_capture_loop(
         let mut encoder_slot: Option<std::sync::Mutex<Option<VideoEncoder>>> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
-            match capture_one(&target) {
+            let frame_index = frames;
+            match capture_one_at(&target, frame_index) {
                 Ok(frame) => {
                     let dimensions = (frame.rgba.width(), frame.rgba.height());
                     let pixels = (dimensions.0 as u64) * (dimensions.1 as u64);
