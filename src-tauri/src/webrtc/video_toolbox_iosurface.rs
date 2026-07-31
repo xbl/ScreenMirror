@@ -6,7 +6,7 @@
 //! `VTCompressionSession` through the `videotoolbox` crate.
 
 use crate::webrtc::screencapturekit_capture::ScreenKitFrame;
-use crate::webrtc::video_toolbox::{avcc_to_annex_b, H264EncodedFrame};
+use crate::webrtc::video_toolbox::H264EncodedFrame;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IOSurfaceEncoderError {
@@ -23,6 +23,7 @@ pub enum IOSurfaceEncoderError {
 #[cfg(all(target_os = "macos", feature = "screenkit"))]
 mod native {
     use super::*;
+    use crate::webrtc::video_toolbox::avcc_to_annex_b;
     use apple_cf::iosurface::{IOSurface, IOSurfaceLockOptions};
     use videotoolbox::compression::CompressionSession;
     use videotoolbox::session::Codec;
@@ -34,6 +35,7 @@ mod native {
         fps: u32,
         session: CompressionSession,
         pts: i64,
+        sps_pps: Vec<u8>,
     }
 
     impl Encoder {
@@ -49,7 +51,7 @@ mod native {
                 .with_max_keyframe_interval((fps.max(1) * 2) as i32)
                 .build()
                 .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
-            Ok(Self { width, height, fps: fps.max(1), session, pts: 0 })
+            Ok(Self { width, height, fps: fps.max(1), session, pts: 0, sps_pps: Vec::new() })
         }
 
         pub fn encode(&mut self, frame: ScreenKitFrame) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
@@ -75,7 +77,32 @@ mod native {
             drop(guard);
             let encoded = self.session.encode(&surface, (self.pts, self.fps as i32)).map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
             self.pts = self.pts.saturating_add(1);
-            let data = avcc_to_annex_b(&encoded.data).unwrap_or(encoded.data);
+            if self.sps_pps.is_empty() {
+                if let Some(sample) = encoded.cm_sample_buffer() {
+                    if let Some(format) = sample.format_description() {
+                        let mut index = 0usize;
+                        loop {
+                            let mut pointer = std::ptr::null();
+                            let mut size = 0usize;
+                            let mut count = 0usize;
+                            let mut header = 0;
+                            let status = unsafe {
+                                apple_cf::raw::CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                                    format.as_ptr().cast(), index, &mut pointer, &mut size, &mut count, &mut header,
+                                )
+                            };
+                            if status != 0 || pointer.is_null() || size == 0 {
+                                break;
+                            }
+                            self.sps_pps.extend_from_slice(&[0, 0, 0, 1]);
+                            self.sps_pps.extend_from_slice(unsafe { std::slice::from_raw_parts(pointer, size) });
+                            index += 1;
+                            if index >= count { break; }
+                        }
+                    }
+                }
+            }
+            let mut data = avcc_to_annex_b(&encoded.data).unwrap_or(encoded.data);
             let keyframe = crate::webrtc::video_toolbox::is_keyframe(&data);
             if keyframe {
                 let has_sps = crate::webrtc::video_toolbox::split_annex_b_nalus(&data)
@@ -85,9 +112,12 @@ mod native {
                     .iter()
                     .any(|nal| nal.first().map(|byte| byte & 0x1f) == Some(8));
                 if !has_sps || !has_pps {
-                    return Err(IOSurfaceEncoderError::Native(
-                        "VideoToolbox keyframe is missing SPS/PPS".into(),
-                    ));
+                    if self.sps_pps.is_empty() {
+                        return Err(IOSurfaceEncoderError::Native("VideoToolbox format description has no SPS/PPS".into()));
+                    }
+                    let mut with_params = self.sps_pps.clone();
+                    with_params.extend_from_slice(&data);
+                    data = with_params;
                 }
             }
             Ok(H264EncodedFrame { data, keyframe, captured_at: frame.captured_at })
