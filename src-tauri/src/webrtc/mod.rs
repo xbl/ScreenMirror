@@ -138,11 +138,20 @@ fn normalize_captured_rgba_with_max_dim(rgba: RgbaImage, max_dim: u32) -> RgbaIm
 fn profile_max_dim(quality: f32) -> u32 {
     match quality {
         q if q >= 0.9 => 3840,
-        // 2560px capture can intermittently block VideoToolbox for hundreds
-        // of milliseconds on macOS, causing seconds of stale-frame buildup.
-        // Keep High readable and responsive; Ultra opts into the larger frame.
+        // High uses 1920px with a decode-friendly frame rate. Ultra remains
+        // an explicit opt-in for devices that can sustain larger frames.
         q if q >= 0.65 => 1920,
         _ => 1920,
+    }
+}
+
+pub fn profile_fps(quality: f32) -> u32 {
+    if quality >= 0.9 {
+        15
+    } else if quality >= 0.65 {
+        20
+    } else {
+        30
     }
 }
 

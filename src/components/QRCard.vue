@@ -18,7 +18,7 @@
     <div class="qr-meta">
       <div class="qr-url" :title="url">{{ url || '—' }}</div>
       <div class="qr-status">
-        <span class="qr-status-dot" :class="{ live: !!url && !slotTaken }" />
+        <span class="qr-status-dot" :class="{ live: !!url }" />
         <span class="qr-status-text">{{ statusText }}</span>
       </div>
       <div class="qr-actions">
@@ -43,8 +43,6 @@ import { api } from '../utils/api';
 type HostInfo = {
   lan_ip?: string;
   port?: number;
-  pending_device?: string | null;
-  connected_devices?: string[];
   room_id?: string | null;
 };
 
@@ -52,7 +50,6 @@ const { t } = useI18n();
 
 const url = ref('');
 const qrDataUrl = ref('');
-const slotTaken = ref(false);
 const copying = ref(false);
 const copyState = ref<'idle' | 'done' | 'failed'>('idle');
 const errorMessage = ref('');
@@ -62,13 +59,11 @@ let pollTimer: number | undefined;
 
 const state = computed<'idle' | 'ready' | 'busy' | 'unavailable'>(() => {
   if (!url.value) return 'idle';
-  if (slotTaken.value) return 'unavailable';
   return 'ready';
 });
 
 const statusText = computed(() => {
   if (!url.value) return errorMessage.value || t('card.waitingForServer');
-  if (slotTaken.value) return t('card.slotUnavailable');
   return t('card.sameWifi');
 });
 
@@ -104,15 +99,9 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
   }
   if (ip && port) {
     try {
-      const [connected, pending] = await Promise.all([
-        api.getConnectedDevices(),
-        api.getPendingDevice(),
-      ]);
       return {
         lan_ip: ip,
         port,
-        pending_device: pending?.id ?? null,
-        connected_devices: connected.map((d) => d.id),
         room_id: roomId,
       };
     } catch (e: any) {
@@ -120,8 +109,6 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
       return {
         lan_ip: ip,
         port,
-        pending_device: null,
-        connected_devices: [],
         room_id: roomId,
       };
     }
@@ -132,8 +119,6 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
     return {
       lan_ip: '127.0.0.1',
       port,
-      pending_device: null,
-      connected_devices: [],
       room_id: roomId,
     };
   }
@@ -204,12 +189,10 @@ async function refresh() {
   const info = await fetchHostInfo();
   if (!info) {
     url.value = '';
-    slotTaken.value = false;
     errorMessage.value = lastFetchError.value || '';
     return;
   }
   url.value = buildUrl(info);
-  slotTaken.value = (info.connected_devices?.length ?? 0) > 0;
   errorMessage.value = '';
   await renderQr(url.value);
 }

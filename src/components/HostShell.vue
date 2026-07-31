@@ -15,27 +15,6 @@
 
         <QRCard class="host-qr" />
 
-        <section
-          v-if="pendingDevice"
-          class="host-approval"
-          role="region"
-          :aria-label="t('devices.title')"
-        >
-          <div class="host-approval-meta">
-            <span class="host-approval-eyebrow">{{ t('devices.title') }}</span>
-            <span class="host-approval-id">{{ pendingDevice.ip }}</span>
-            <span class="host-approval-sub">{{ pendingDevice.os }} · {{ pendingDevice.browser }}</span>
-          </div>
-          <div class="host-approval-actions">
-            <button class="host-approval-deny" type="button" @click="onDeny">
-              {{ t('devices.deny') }}
-            </button>
-            <button class="host-approval-approve" type="button" @click="onApprove">
-              {{ t('devices.approve') }}
-            </button>
-          </div>
-        </section>
-
         <SourcePicker class="host-source" />
 
         <StartButton
@@ -70,7 +49,7 @@ import StartButton from './StartButton.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
 import ScreenRecordingPermissionModal from './ScreenRecordingPermissionModal.vue';
-import { api, type Device } from '../utils/api';
+import { api } from '../utils/api';
 
 const { t } = useI18n();
 
@@ -78,7 +57,6 @@ const showDevices = ref(false);
 const showSettings = ref(false);
 const sharing = ref(false);
 const viewerCount = ref(0);
-const pendingDevice = ref<Device | null>(null);
 const permissionModal: ProvidedPermissionModal = ref(null);
 provide(PermissionModalKey, permissionModal);
 
@@ -86,12 +64,8 @@ let poll: number | undefined;
 
 async function refreshState() {
   try {
-    const [devs, pending] = await Promise.all([
-      api.getConnectedDevices(),
-      api.getPendingDevice(),
-    ]);
+    const devs = await api.getConnectedDevices();
     viewerCount.value = devs.length;
-    pendingDevice.value = pending;
     // sharing is now driven by user intent (Start/Stop), not by the
     // connected-devices count. A viewer may briefly be 'pending' before
     // being approved, and we don't want the button to flip back to
@@ -102,29 +76,9 @@ async function refreshState() {
   }
 }
 
-async function onApprove() {
-  try {
-    await api.setDeviceConnectedStatus();
-    pendingDevice.value = null;
-    await refreshState();
-  } catch {
-    /* ignore */
-  }
-}
-
-async function onDeny() {
-  try {
-    await api.disconnectAllDevices();
-    pendingDevice.value = null;
-  } catch {
-    /* ignore */
-  }
-}
-
 async function onReset() {
   sharing.value = false;
   viewerCount.value = 0;
-  pendingDevice.value = null;
 }
 
 onMounted(async () => {
@@ -197,78 +151,6 @@ onBeforeUnmount(() => {
 
 .host-qr {
   /* No extra styling — the component owns its look. */
-}
-
-.host-approval {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5);
-  border: var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  border-left: 3px solid var(--accent);
-}
-
-.host-approval-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.host-approval-eyebrow {
-  font-size: var(--fs-12);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--accent);
-}
-
-.host-approval-id {
-  font-family: var(--font-mono);
-  font-size: var(--fs-14);
-  color: var(--text);
-}
-
-.host-approval-sub {
-  font-size: var(--fs-12);
-  color: var(--muted);
-}
-
-.host-approval-actions {
-  display: flex;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
-
-.host-approval-approve,
-.host-approval-deny {
-  padding: 8px 16px;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-13);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  background: transparent;
-  transition: background var(--motion) ease, border-color var(--motion) ease;
-}
-
-.host-approval-approve {
-  background: var(--accent);
-  color: #0a1413;
-  border-color: var(--accent);
-  font-weight: 500;
-}
-
-.host-approval-approve:hover {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.host-approval-deny:hover {
-  background: var(--surface-2);
-  border-color: var(--danger);
-  color: var(--danger);
 }
 
 .host-source {

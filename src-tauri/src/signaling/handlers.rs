@@ -14,7 +14,7 @@ use axum::{
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::{Arc, atomic::{AtomicU64, Ordering}}};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -39,14 +39,16 @@ pub fn parse_message(raw: &str) -> Result<WireMessage, serde_json::Error> {
 pub type ViewerSinkMap =
     Arc<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<String>>>>;
 
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone)]
 pub struct AppState {
     pub room_ids: Arc<Mutex<RoomIDService>>,
     pub devices: Arc<Mutex<ConnectedDevicesService>>,
     pub viewer_path: PathBuf,
-    /// Active host peer per room id. Keyed by the room id passed in WS query.
+    /// Active host peer per viewer connection. Multiple peers may share a room.
     pub host_peers: Arc<Mutex<std::collections::HashMap<String, Arc<HostPeer>>>>,
-    /// Per-room viewer sink. When host creates answer, push it here.
+    /// Per-connection viewer sink. When host creates an answer, push it here.
     pub viewer_sinks: ViewerSinkMap,
     /// Optional capture target selected by the host UI for this session.
     pub capture_target: Arc<Mutex<Option<crate::webrtc::CaptureTarget>>>,
@@ -216,12 +218,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
         return;
     }
 
+    let connection_id = format!("{}-{}", room_id, NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed));
+
     // Per-connection outbound mpsc — host pushes (ANSWER/ICE) here directly.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
     state
         .viewer_sinks
         .lock()
-        .insert(room_id.clone(), out_tx.clone());
+        .insert(connection_id.clone(), out_tx.clone());
 
     while let Some(msg) = socket.recv().await {
         tracing::info!(
@@ -255,7 +259,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                 let peer_entry = {
                                     let mut peers = state.host_peers.lock();
                                     peers
-                                                .entry(room_id.clone())
+                                                .entry(connection_id.clone())
                                                 .or_insert_with(|| {
                                                     let p = Arc::new(HostPeer::new());
                                                     let bind_ip = std::env::var("SCREENMIRROR_HOST_IP")
@@ -281,24 +285,20 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                 Ok(answer) => {
                                     tracing::info!("sending ANSWER ({} bytes)", answer.len());
                                     if let Some(sink) =
-                                        state.viewer_sinks.lock().get(&room_id).cloned()
+                                        state.viewer_sinks.lock().get(&connection_id).cloned()
                                     {
                                         let _ = sink.send(
                                             serde_json::json!({"type": "ANSWER", "payload": {"sdp": answer}})
                                                 .to_string(),
                                         );
                                     }
-                                    // Production flow: the host UI does not yet ship a
-                                    // manual approval dialog, so we register the
-                                    // viewer into `devices` immediately so the host's
-                                    // ConnectedDevicesListDrawer shows them. We still
-                                    // push ALLOWED_TO_CONNECT so the viewer advances
-                                    // past its "waiting for allow" prompt.
+                                    // LAN viewers are auto-approved; each connection is
+                                    // tracked independently so multiple clients can join.
                                     let viewer_label =
                                         std::env::var("SCREENMIRROR_E2E_VIEWER_NAME")
                                             .unwrap_or_else(|_| "Browser Viewer".into());
                                     let device = crate::signaling::devices::Device {
-                                        id: format!("viewer-{}", room_id),
+                                        id: connection_id.clone(),
                                         name: viewer_label,
                                         ip: "127.0.0.1".into(),
                                         os: "browser".into(),
@@ -306,29 +306,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                         room_id: room_id.clone(),
                                         sharing_session_id: room_id.clone(),
                                     };
-                                    let mut devs = state.devices.lock();
-                                    // Treat as auto-approved unless a slot is
-                                    // already taken by another live viewer.
-                                    if devs.is_slot_available() {
-                                        let _ = devs.add_device(device);
-                                        drop(devs);
-                                        if let Some(sink) =
-                                            state.viewer_sinks.lock().get(&room_id).cloned()
-                                        {
-                                            let _ = sink.send(
-                                                serde_json::json!({"type": "ALLOWED_TO_CONNECT"})
-                                                    .to_string(),
-                                            );
-                                        }
-                                        tracing::info!("auto-approved viewer in room {}", room_id);
-                                    } else {
-                                        // Slot occupied — register as pending so the
-                                        // host UI can show an approval banner.
-                                        devs.set_pending(device);
-                                        drop(devs);
-                                        tracing::info!(
-                                            "viewer queued in pending for room {}",
-                                            room_id
+                                    state.devices.lock().add_device(device).ok();
+                                    if let Some(sink) =
+                                        state.viewer_sinks.lock().get(&connection_id).cloned()
+                                    {
+                                        let _ = sink.send(
+                                            serde_json::json!({"type": "ALLOWED_TO_CONNECT"})
+                                                .to_string(),
                                         );
                                     }
                                     let target = (*state.capture_target.lock()).or_else(|| {
@@ -342,7 +326,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                         })
                                     });
                                     if let (Some(target), Some(peer)) = (target, peer_opt) {
-                                        if let Err(e) = peer.start_sharing(target, 30) {
+                                        let fps = crate::webrtc::profile_fps(target.quality);
+                                        if let Err(e) = peer.start_sharing(target, fps) {
                                             tracing::error!("start_sharing: {e}");
                                         }
                                     }
@@ -375,8 +360,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
         }
     }
 
-    state.viewer_sinks.lock().remove(&room_id);
-    if let Some(peer) = state.host_peers.lock().remove(&room_id) {
+    state.viewer_sinks.lock().remove(&connection_id);
+    state.devices.lock().release_device(&connection_id);
+    if let Some(peer) = state.host_peers.lock().remove(&connection_id) {
         peer.stop();
     }
 }

@@ -117,10 +117,7 @@ pub fn disconnect_device(state: State<'_, CommandState>, id: String) -> bool {
 
 #[tauri::command]
 pub fn disconnect_all_devices(state: State<'_, CommandState>) {
-    let mut devices = state.devices.lock();
-    if let Some(d) = devices.get_devices().first() {
-        devices.release_device(&d.id);
-    }
+    state.devices.lock().release_all();
 }
 
 #[tauri::command]

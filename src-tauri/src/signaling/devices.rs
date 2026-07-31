@@ -12,57 +12,53 @@ pub struct Device {
 }
 
 pub struct ConnectedDevicesService {
-    occupied: Option<Device>,
-    pending: Option<Device>,
+    devices: Vec<Device>,
 }
 
 impl ConnectedDevicesService {
     pub fn new() -> Self {
         Self {
-            occupied: None,
-            pending: None,
+            devices: Vec::new(),
         }
     }
 
     pub fn add_device(&mut self, device: Device) -> Result<(), String> {
-        match &self.occupied {
-            Some(d) if d.id == device.id => Ok(()),
-            Some(_) => Err("viewer slot is already occupied".into()),
-            None => {
-                self.occupied = Some(device);
-                Ok(())
-            }
+        if let Some(existing) = self.devices.iter_mut().find(|d| d.id == device.id) {
+            *existing = device;
+        } else {
+            self.devices.push(device);
         }
+        Ok(())
     }
 
     pub fn release_device(&mut self, id: &str) -> bool {
-        match &self.occupied {
-            Some(d) if d.id == id => {
-                self.occupied = None;
-                true
-            }
-            _ => false,
-        }
+        let before = self.devices.len();
+        self.devices.retain(|device| device.id != id);
+        self.devices.len() != before
+    }
+
+    pub fn release_all(&mut self) {
+        self.devices.clear();
     }
 
     pub fn get_devices(&self) -> Vec<Device> {
-        self.occupied.clone().into_iter().collect()
+        self.devices.clone()
     }
 
     pub fn is_slot_available(&self) -> bool {
-        self.occupied.is_none()
+        true
     }
 
     pub fn set_pending(&mut self, device: Device) {
-        self.pending = Some(device);
+        self.add_device(device).ok();
     }
 
     pub fn reset_pending(&mut self) {
-        self.pending = None;
+        // Kept for command/API compatibility; connections are now independent.
     }
 
     pub fn get_pending(&self) -> Option<Device> {
-        self.pending.clone()
+        None
     }
 }
 

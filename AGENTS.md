@@ -28,9 +28,8 @@ the normal deployment environment, not as a constrained WAN link.
   jitter, playback, or encoder queues to make motion look smoother.
 - Use the available LAN bandwidth for readable text and high-resolution screen
   content. Preserve at least 30 fps when the host can sustain it.
-- The default High profile is capped at 1920px because larger VideoToolbox
-  frames can block encoding for hundreds of milliseconds; Ultra is opt-in for
-  higher resolution when the host can sustain it.
+- High uses 1920px at 20fps to balance readable text with browser decode load;
+  Ultra is opt-in at 3840px/15fps for devices that can sustain it.
 - Quality controls belong on the host, where capture and H.264 settings are
   decided. Viewer controls must not pretend to change encoding unless they
   renegotiate the stream.
