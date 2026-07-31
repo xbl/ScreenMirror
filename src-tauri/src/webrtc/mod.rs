@@ -1,8 +1,8 @@
 //! Screen capture -> H.264 -> RTP via str0m.
 
 use image::RgbaImage;
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
-use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 pub mod ffi;
@@ -346,7 +346,10 @@ pub fn spawn_video_capture_loop(
     let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
-    let (frame_tx, frame_rx) = sync_channel::<CapturedFrame>(1);
+    // Keep exactly one pending capture. A slow encoder must consume the newest
+    // frame available, never a queue of already-stale frames.
+    let frame_slot = Arc::new((Mutex::new(None::<CapturedFrame>), Condvar::new()));
+    let encoder_frame_slot = frame_slot.clone();
     let encoder_running = running.clone();
     let encoder_sink = sink.clone();
     std::thread::spawn(move || {
@@ -355,14 +358,26 @@ pub fn spawn_video_capture_loop(
         let mut iosurface_disabled = false;
         let mut encoded_count = 0u32;
         while encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
-            let mut frame = match frame_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(frame) => frame,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            let mut frame = {
+                let (lock, wake) = &*encoder_frame_slot;
+                let mut slot = match lock.lock() {
+                    Ok(slot) => slot,
+                    Err(_) => break,
+                };
+                while slot.is_none() && encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
+                    match wake.wait_timeout(slot, Duration::from_millis(100)) {
+                        Ok((next, _)) => slot = next,
+                        Err(_) => return,
+                    }
+                }
+                if !encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                match slot.take() {
+                    Some(frame) => frame,
+                    None => continue,
+                }
             };
-            while let Ok(newer) = frame_rx.try_recv() {
-                frame = newer;
-            }
             let dimensions = (frame.rgba.width(), frame.rgba.height());
             let encode_started = std::time::Instant::now();
             let native_result = if let Some(native_frame) = frame.screenkit.take() {
@@ -591,15 +606,13 @@ pub fn spawn_video_capture_loop(
             match captured {
                 Ok(frame) => {
                     frames = frames.wrapping_add(1);
-                    match frame_tx.try_send(frame) {
-                        Ok(()) => {}
-                        Err(TrySendError::Full(newest)) => {
-                            // The encoder thread drains the channel and keeps
-                            // the newest available frame; never block capture
-                            // waiting for a slow encode.
-                            drop(newest);
+                    let (slot, wake) = &*frame_slot;
+                    match slot.lock() {
+                        Ok(mut current) => {
+                            *current = Some(frame);
+                            wake.notify_one();
                         }
-                        Err(TrySendError::Disconnected(_)) => break,
+                        Err(_) => break,
                     }
                 }
                 Err(error) => tracing::warn!("capture error: {error}"),
