@@ -24,10 +24,10 @@ pub enum IOSurfaceEncoderError {
 mod native {
     use super::*;
     use apple_cf::iosurface::{IOSurface, IOSurfaceLockOptions};
-    use std::time::Instant;
     use videotoolbox::compression::CompressionSession;
     use videotoolbox::session::Codec;
 
+    #[derive(Debug)]
     pub struct Encoder {
         width: u32,
         height: u32,
@@ -57,10 +57,10 @@ mod native {
             let surface = IOSurface::create(self.width as usize, self.height as usize, u32::from_be_bytes(*b"BGRA"), 4)
                 .ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface::create failed".into()))?;
             let expected_row = self.width as usize * 4;
-            if frame.width != self.width || frame.height != self.height || frame.bytes_per_row < expected_row {
+            if frame.width != self.width || frame.height != self.height || frame.bytes_per_row < expected_row as u32 {
                 return Err(IOSurfaceEncoderError::Native(format!("frame dimensions {}x{} do not match encoder {}x{}", frame.width, frame.height, self.width, self.height)));
             }
-            let mut guard = surface.lock(IOSurfaceLockOptions::empty()).map_err(|e| IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}")))?;
+            let mut guard = surface.lock(IOSurfaceLockOptions::from_bits(0)).map_err(|e| IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}")))?;
             let dst_stride = guard.bytes_per_row();
             let dst = guard.as_slice_mut().ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface is not writable".into()))?;
             let src_stride = frame.bytes_per_row as usize;
