@@ -77,6 +77,19 @@ mod native {
             self.pts = self.pts.saturating_add(1);
             let data = avcc_to_annex_b(&encoded.data).unwrap_or(encoded.data);
             let keyframe = crate::webrtc::video_toolbox::is_keyframe(&data);
+            if keyframe {
+                let has_sps = crate::webrtc::video_toolbox::split_annex_b_nalus(&data)
+                    .iter()
+                    .any(|nal| nal.first().map(|byte| byte & 0x1f) == Some(7));
+                let has_pps = crate::webrtc::video_toolbox::split_annex_b_nalus(&data)
+                    .iter()
+                    .any(|nal| nal.first().map(|byte| byte & 0x1f) == Some(8));
+                if !has_sps || !has_pps {
+                    return Err(IOSurfaceEncoderError::Native(
+                        "VideoToolbox keyframe is missing SPS/PPS".into(),
+                    ));
+                }
+            }
             Ok(H264EncodedFrame { data, keyframe, captured_at: frame.captured_at })
         }
 
