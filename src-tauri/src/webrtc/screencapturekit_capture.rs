@@ -16,7 +16,7 @@ use super::CaptureTarget;
 /// `bgra` is populated by the readback path.  `iosurface` is an opaque native
 /// handle reserved for the zero-copy VideoToolbox path; it is intentionally a
 /// `usize` here so non-macOS callers never need to link CoreVideo types.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScreenKitFrame {
     pub width: u32,
     pub height: u32,

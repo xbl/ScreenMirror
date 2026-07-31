@@ -6,7 +6,7 @@
 //! `VTCompressionSession` through the `videotoolbox` crate.
 
 use crate::webrtc::screencapturekit_capture::ScreenKitFrame;
-use crate::webrtc::video_toolbox::{annex_b_to_avcc, H264EncodedFrame};
+use crate::webrtc::video_toolbox::{avcc_to_annex_b, H264EncodedFrame};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IOSurfaceEncoderError {
@@ -75,7 +75,7 @@ mod native {
             drop(guard);
             let encoded = self.session.encode(&surface, (self.pts, self.fps as i32)).map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
             self.pts = self.pts.saturating_add(1);
-            let data = annex_b_to_avcc(&encoded.data).unwrap_or(encoded.data);
+            let data = avcc_to_annex_b(&encoded.data).unwrap_or(encoded.data);
             let keyframe = crate::webrtc::video_toolbox::is_keyframe(&data);
             Ok(H264EncodedFrame { data, keyframe, captured_at: frame.captured_at })
         }

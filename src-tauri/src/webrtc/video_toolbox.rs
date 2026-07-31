@@ -64,6 +64,35 @@ pub fn annex_b_to_avcc(sample: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// Convert VideoToolbox's length-prefixed H.264 access units to Annex B.
+/// Existing str0m packetization expects start-code-prefixed NAL units.
+pub fn avcc_to_annex_b(sample: &[u8]) -> Result<Vec<u8>, String> {
+    if sample.starts_with(&[0, 0, 1]) || sample.starts_with(&[0, 0, 0, 1]) {
+        return Ok(sample.to_vec());
+    }
+    let mut out = Vec::with_capacity(sample.len() + 16);
+    let mut offset = 0usize;
+    while offset + 4 <= sample.len() {
+        let len = u32::from_be_bytes([
+            sample[offset],
+            sample[offset + 1],
+            sample[offset + 2],
+            sample[offset + 3],
+        ]) as usize;
+        offset += 4;
+        if len == 0 || offset + len > sample.len() {
+            return Err("invalid AVCC NAL length".into());
+        }
+        out.extend_from_slice(&[0, 0, 0, 1]);
+        out.extend_from_slice(&sample[offset..offset + len]);
+        offset += len;
+    }
+    if offset != sample.len() || out.is_empty() {
+        return Err("H.264 sample contains no complete AVCC NAL units".into());
+    }
+    Ok(out)
+}
+
 /// Normalize H.264 codec extradata to Annex B form, regardless of whether
 /// the encoder hands us AVCC (length-prefixed) or Annex B (start-code-
 /// prefixed) bytes.

@@ -92,6 +92,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
 pub struct CapturedFrame {
     pub rgba: RgbaImage,
     pub captured_at: std::time::Instant,
+    pub screenkit: Option<ScreenKitFrame>,
 }
 
 fn normalize_encoder_dimensions(width: u32, height: u32) -> (u32, u32) {
@@ -185,6 +186,7 @@ fn captured_frame_from_rgba(rgba: RgbaImage, quality: f32) -> CapturedFrame {
     CapturedFrame {
         rgba: normalize_captured_rgba(rgba, quality),
         captured_at: std::time::Instant::now(),
+        screenkit: None,
     }
 }
 
@@ -198,6 +200,7 @@ fn captured_frame_from_screenkit(
     let width = frame.width as usize;
     let height = frame.height as usize;
     let stride = frame.bytes_per_row as usize;
+    let native_frame = frame.clone();
     let bgra = frame
         .bgra
         .ok_or_else(|| "ScreenCaptureKit frame has no BGRA readback".to_string())?;
@@ -224,6 +227,7 @@ fn captured_frame_from_screenkit(
         .ok_or_else(|| "ScreenCaptureKit RGBA dimensions do not match buffer".to_string())?;
     let mut captured = captured_frame_from_rgba(rgba, quality);
     captured.captured_at = frame.captured_at;
+    captured.screenkit = Some(native_frame);
     Ok(captured)
 }
 
@@ -347,6 +351,8 @@ pub fn spawn_video_capture_loop(
     let encoder_sink = sink.clone();
     std::thread::spawn(move || {
         let mut encoder: Option<VideoEncoder> = None;
+        let mut iosurface_encoder: Option<IOSurfaceVideoEncoder> = None;
+        let mut iosurface_disabled = false;
         let mut encoded_count = 0u32;
         while encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
             let mut frame = match frame_rx.recv_timeout(Duration::from_millis(100)) {
@@ -358,7 +364,52 @@ pub fn spawn_video_capture_loop(
                 frame = newer;
             }
             let dimensions = (frame.rgba.width(), frame.rgba.height());
-            if encoder.is_none() {
+            let encode_started = std::time::Instant::now();
+            let native_result = if let Some(native_frame) = frame.screenkit.take() {
+                if !iosurface_disabled {
+                    if iosurface_encoder.is_none() {
+                        let kbps = capture_bitrate_kbps(
+                            native_frame.width,
+                            native_frame.height,
+                            fps,
+                            target.quality,
+                        );
+                        match IOSurfaceVideoEncoder::new(
+                            native_frame.width & !1,
+                            native_frame.height & !1,
+                            fps.max(1),
+                            kbps,
+                        ) {
+                            Ok(value) => iosurface_encoder = Some(value),
+                            Err(error) => {
+                                tracing::warn!("native IOSurface encoder unavailable; falling back to FFmpeg: {error}");
+                                iosurface_disabled = true;
+                            }
+                        }
+                    }
+                    if let Some(native_encoder) = iosurface_encoder.as_mut() {
+                        match native_encoder.encode(native_frame) {
+                            Ok(encoded) => Some(Ok(encoded)),
+                            Err(error) => {
+                                tracing::warn!("native IOSurface encode failed; falling back to FFmpeg: {error}");
+                                iosurface_encoder = None;
+                                iosurface_disabled = true;
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let result = if let Some(result) = native_result {
+                result
+            } else {
+                if encoder.is_none() {
                 let kbps = capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
                 match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
                     Ok(value) => encoder = Some(value),
@@ -367,9 +418,9 @@ pub fn spawn_video_capture_loop(
                         continue;
                     }
                 }
-            }
-            let encode_started = std::time::Instant::now();
-            let result = encoder.as_mut().unwrap().encode(frame.rgba.as_raw());
+                }
+                encoder.as_mut().unwrap().encode(frame.rgba.as_raw())
+            };
             let elapsed = encode_started.elapsed();
             if encoded_count < 3 || elapsed >= Duration::from_millis(100) {
                 tracing::info!("video encode dimensions={}x{} elapsed={:?}", dimensions.0, dimensions.1, elapsed);
