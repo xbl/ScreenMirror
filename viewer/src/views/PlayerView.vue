@@ -71,6 +71,11 @@ const videoEl = ref<HTMLVideoElement | null>(null);
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
 
+// VideoToolbox can take several seconds to initialize on a real screen capture
+// before the first keyframe arrives. Keep the element mounted during that cold
+// start; the watchdog is for a genuinely stalled stream, not encoder startup.
+const FRAME_WATCHDOG_MS = 10_000;
+
 const statusText = computed(() => {
   if (status.value === 'streaming') return t('player.streaming');
   if (status.value === 'disconnected') return t('player.disconnected');
@@ -129,11 +134,11 @@ function startFrameWatchdog() {
       return;
     }
     if (v.videoWidth === 0 || v.videoHeight === 0) {
-      console.error('[player-view] no frames after 5s; videoWidth=0 videoHeight=0 readyState=' + v.readyState + ' networkState=' + v.networkState + ' error=' + (v.error ? v.error.code : 'none'));
+      console.error('[player-view] no frames after ' + (FRAME_WATCHDOG_MS / 1000) + 's; videoWidth=0 videoHeight=0 readyState=' + v.readyState + ' networkState=' + v.networkState + ' error=' + (v.error ? v.error.code : 'none'));
       noFrames.value = true;
       markDisconnected();
     }
-  }, 5000);
+  }, FRAME_WATCHDOG_MS);
 }
 
 function onLoadedMetadata() {

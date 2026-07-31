@@ -1,9 +1,10 @@
 # AGENTS.md
 
 > Operational guide for AI agents and humans working inside this `screenmirror/`
-> subtree. The repo root `/Users/blxie/workspace/every-screen/` is **not** a
-> git repository and contains unrelated directories (e.g. `deskreen/`) that
-> must be ignored. All paths below are relative to `screenmirror/`.
+> subtree. This **is** a git repository (rooted at `screenmirror/`, branch:
+> `master`). The parent directory `/Users/blxie/workspace/every-screen/`
+> contains unrelated directories (e.g. `deskreen/`) that must be ignored.
+> All paths below are relative to `screenmirror/`.
 
 ## What this is
 
@@ -149,11 +150,49 @@ The pre-existing warnings, in case a reviewer flags them as new:
 
 ## Git / commits
 
-- **`/Users/blxie/workspace/every-screen/` is not a git repo.** Plan steps
-  that say `git commit` do not apply. Produce a per-task implementation
-  report (`.superpowers/sdd/task-N-report.md`) instead.
-- The `tools/output/` directory is the E2E screenshot dump and should not be
-  hand-edited.
+- `screenmirror/` is a git repo. `git add` / `git commit` work normally here.
+- The `tools/output/` directory is the E2E screenshot dump and is gitignored;
+  do not hand-edit or commit it.
+
+## Diagnosing "viewer no frames after 5s" — start here
+
+The symptom `[player-view] no frames after 5s; videoWidth=0 readyState=0` in
+the viewer is **the same symptom** for many distinct root causes. Before
+editing PlayerView.vue or the WebRTC handshake, run:
+
+```bash
+# 1. Make sure no zombie screenmirror is squatting on the port.
+lsof -nP -iTCP:3131 -sTCP:LISTEN
+# If anything is listed, kill it (it may be from a previous crashed e2e run):
+pkill -9 -f "target/debug/screenmirror"
+pkill -9 -f "Google Chrome.*headless"
+
+# 2. Run the direct diagnostic that drives both ends:
+node tools/diag-frames-direct.js
+# Look for in /tmp/diag-run*.log:
+#   tauri log: "smoke room registered" THEN "signaling server on 0.0.0.0:3131"
+#   tauri log: "WS handler entered" + "WS throttle passed for room=..., taken_snapshot=[...], requested_match=true"
+#   viewer: "[early-offer] video track received"
+#   tauri log: "host: MediaAdded mid=Mid(0) direction=SendOnly" + "host: starting capture loop"
+#   diag trace: w=320x180 rs=4 pixR=255G=255B=255
+# If any of those is missing, that's the actual broken link.
+```
+
+**Common non-code causes** that produce the "no frames" symptom but are NOT
+PlayerView bugs:
+- Zombie `target/debug/screenmirror` holding port 3131 from a prior crashed
+  e2e run → ws gets `NOT_ALLOWED` and closes immediately, no stream ever
+  arrives.
+- Chrome not actually launching under puppeteer (no `--user-data-dir`) → no
+  viewer-side console at all; this looks like "nothing happens."
+- Stale `viewer/dist/` (vue-tsc or vite cache) → fixes were committed but
+  never rebuilt into the bundle the host serves. Run
+  `cd viewer && npm run build` after every frontend change.
+
+**When the diagnostic above shows `WS rejected: room not taken`** even though
+`SCREENMIRROR_TEST_ROOM` is set, suspect a zombie binary from a previous
+session listening on the port and answering `NOT_ALLOWED` before your fresh
+binary can. Kill it and re-run.
 
 ## Where work artifacts live
 
@@ -163,6 +202,7 @@ The pre-existing warnings, in case a reviewer flags them as new:
 | Implementation plans | `../docs/superpowers/plans/*.md` |
 | Subagent-driven-development brief/report/review | `.superpowers/sdd/task-N-*.md` |
 | Plans produced by ZCode plan mode | `.zcode/plans/*.md` |
+| Headless E2E (real host + real Chrome) | `tools/diag-frames-direct.js` (use this first when diagnosing "no frames") |
 
 When picking up a plan, read the spec first, then the plan, then the brief —
 in that order. Spec → plan → brief form a contract chain.

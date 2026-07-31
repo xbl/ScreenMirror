@@ -1,6 +1,7 @@
 //! Screen capture -> H.264 -> RTP via str0m.
 
 use image::RgbaImage;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,6 +87,38 @@ pub struct CapturedFrame {
     pub captured_at: std::time::Instant,
 }
 
+fn normalize_encoder_dimensions(width: u32, height: u32) -> (u32, u32) {
+    (width & !1, height & !1)
+}
+
+fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
+    let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1280);
+    let rgba = if rgba.width() > max_dim || rgba.height() > max_dim {
+        let scale = max_dim as f32 / rgba.width().max(rgba.height()) as f32;
+        let nw = ((rgba.width() as f32) * scale).round().max(1.0) as u32;
+        let nh = ((rgba.height() as f32) * scale).round().max(1.0) as u32;
+        image::imageops::resize(&rgba, nw, nh, image::imageops::FilterType::Nearest)
+    } else {
+        rgba
+    };
+    let (encoder_width, encoder_height) = normalize_encoder_dimensions(rgba.width(), rgba.height());
+    if (encoder_width, encoder_height) != (rgba.width(), rgba.height()) {
+        image::imageops::crop_imm(&rgba, 0, 0, encoder_width, encoder_height).to_image()
+    } else {
+        rgba
+    }
+}
+
+fn captured_frame_from_rgba(rgba: RgbaImage) -> CapturedFrame {
+    CapturedFrame {
+        rgba: normalize_captured_rgba(rgba),
+        captured_at: std::time::Instant::now(),
+    }
+}
+
 pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
     capture_one_at(target, 0)
 }
@@ -93,48 +126,47 @@ pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
 pub fn capture_one_at(target: &CaptureTarget, frame_index: u32) -> Result<CapturedFrame, String> {
     #[cfg(target_os = "macos")]
     {
-        use xcap::{Monitor, Window};
-        let img = match target.kind {
-            CaptureKind::Screen => Monitor::all()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .nth(target.id as usize)
-                .ok_or_else(|| format!("screen index {} out of range", target.id))?
-                .capture_image()
-                .map_err(|e| e.to_string())?,
-            CaptureKind::Window => Window::all()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .nth(target.id as usize)
-                .ok_or_else(|| format!("window index {} out of range", target.id))?
-                .capture_image()
-                .map_err(|e| e.to_string())?,
-            CaptureKind::TestPattern => render_test_pattern(target.id.wrapping_add(frame_index)),
-        };
-        let (w, h) = (img.width(), img.height());
-        let rgba = RgbaImage::from_raw(w, h, img.into_raw())
-            .ok_or_else(|| "captured frame has wrong size".to_string())?;
-        let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let rgba = if rgba.width() > max_dim || rgba.height() > max_dim {
-            let scale = max_dim as f32 / rgba.width().max(rgba.height()) as f32;
-            let nw = ((rgba.width() as f32) * scale).round().max(1.0) as u32;
-            let nh = ((rgba.height() as f32) * scale).round().max(1.0) as u32;
-            image::imageops::resize(&rgba, nw, nh, image::imageops::FilterType::Triangle)
-        } else {
-            rgba
-        };
-        Ok(CapturedFrame {
-            rgba,
-            captured_at: std::time::Instant::now(),
-        })
+        capture_one_at_with_monitor(target, frame_index, None)
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = (target, frame_index);
         Err("capture not implemented on this platform".into())
     }
+}
+
+#[cfg(target_os = "macos")]
+fn capture_one_at_with_monitor(
+    target: &CaptureTarget,
+    frame_index: u32,
+    cached_monitor: Option<&xcap::Monitor>,
+) -> Result<CapturedFrame, String> {
+    use xcap::{Monitor, Window};
+    let img = match target.kind {
+        CaptureKind::Screen => {
+            let monitor = match cached_monitor {
+                Some(monitor) => monitor.clone(),
+                None => Monitor::all()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .nth(target.id as usize)
+                    .ok_or_else(|| format!("screen index {} out of range", target.id))?,
+            };
+            monitor.capture_image()
+        }
+        CaptureKind::Window => Window::all()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .nth(target.id as usize)
+            .ok_or_else(|| format!("window index {} out of range", target.id))?
+            .capture_image(),
+        CaptureKind::TestPattern => Ok(render_test_pattern(target.id.wrapping_add(frame_index))),
+    }
+    .map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
+    let rgba = RgbaImage::from_raw(w, h, img.into_raw())
+        .ok_or_else(|| "captured frame has wrong size".to_string())?;
+    Ok(captured_frame_from_rgba(rgba))
 }
 
 /// Render a 320x180 RGBA frame with a moving radial gradient. Encoded by the
@@ -208,12 +240,77 @@ pub fn spawn_video_capture_loop(
         interval
     );
     std::thread::spawn(move || {
-        let capture_started_at = std::time::Instant::now();
+        #[cfg(target_os = "macos")]
+        let cached_monitor = if matches!(target.kind, CaptureKind::Screen) {
+            xcap::Monitor::all()
+                .map_err(|e| e.to_string())
+                .and_then(|monitors| {
+                    monitors
+                        .into_iter()
+                        .nth(target.id as usize)
+                        .ok_or_else(|| format!("screen index {} out of range", target.id))
+                })
+                .ok()
+        } else {
+            None
+        };
+        #[cfg(target_os = "macos")]
+        let mut screen_capture = if let Some(monitor) = cached_monitor.as_ref() {
+            match monitor.video_recorder() {
+                Ok((recorder, receiver)) => match recorder.start() {
+                    Ok(()) => {
+                        tracing::info!(
+                            "using xcap continuous screen recorder for low-latency capture"
+                        );
+                        Some((recorder, receiver))
+                    }
+                    Err(error) => {
+                        tracing::warn!("continuous screen recorder unavailable: {error}");
+                        None
+                    }
+                },
+                Err(error) => {
+                    tracing::warn!("continuous screen recorder unavailable: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut screen_capture: Option<()> = None;
         let mut encoder_slot: Option<std::sync::Mutex<Option<VideoEncoder>>> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             let frame_index = frames;
-            match capture_one_at(&target, frame_index) {
+            let captured = if let Some((_, receiver)) = screen_capture.as_mut() {
+                match receiver.recv_timeout(interval) {
+                    Ok(mut raw_frame) => {
+                        while let Ok(newer) = receiver.try_recv() {
+                            raw_frame = newer;
+                        }
+                        RgbaImage::from_raw(raw_frame.width, raw_frame.height, raw_frame.raw)
+                            .map(captured_frame_from_rgba)
+                            .ok_or_else(|| "continuous capture returned invalid frame".to_string())
+                    }
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        tracing::warn!("continuous screen recorder disconnected");
+                        screen_capture = None;
+                        continue;
+                    }
+                }
+            } else {
+                #[cfg(target_os = "macos")]
+                {
+                    capture_one_at_with_monitor(&target, frame_index, cached_monitor.as_ref())
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    capture_one_at(&target, frame_index)
+                }
+            };
+            match captured {
                 Ok(frame) => {
                     let dimensions = (frame.rgba.width(), frame.rgba.height());
                     let pixels = (dimensions.0 as u64) * (dimensions.1 as u64);
@@ -241,16 +338,16 @@ pub fn spawn_video_capture_loop(
                                 }
                             }
                         }
-                        guard.as_mut().unwrap().encode(frame.rgba.as_raw())
+                        let encoded = guard.as_mut().unwrap().encode(frame.rgba.as_raw());
+                        encoded
                     };
                     match result {
                         Ok(encoded) => {
                             frames = frames.wrapping_add(1);
                             if frames <= 3 {
                                 tracing::info!(
-                                    "video capture: encoded frame #{} total_elapsed={:?} bytes={} keyframe={}",
+                                    "video capture: encoded frame #{} bytes={} keyframe={}",
                                     frames,
-                                    capture_started_at.elapsed(),
                                     encoded.data.len(),
                                     encoded.keyframe,
                                 );
@@ -278,6 +375,22 @@ pub fn spawn_video_capture_loop(
 
 pub struct CaptureHandle {
     running: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_encoder_dimensions;
+
+    #[test]
+    fn normalizes_odd_capture_dimensions_for_video_encoder() {
+        assert_eq!(normalize_encoder_dimensions(1920, 1247), (1920, 1246));
+        assert_eq!(normalize_encoder_dimensions(1919, 1247), (1918, 1246));
+    }
+
+    #[test]
+    fn preserves_even_capture_dimensions() {
+        assert_eq!(normalize_encoder_dimensions(1920, 1248), (1920, 1248));
+    }
 }
 
 impl CaptureHandle {
