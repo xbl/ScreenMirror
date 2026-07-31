@@ -8,7 +8,7 @@ default-run = "screenmirror"
 
 [features]
 default = []
-screenkit = ["dep:screencapturekit"]
+screenkit = ["dep:screencapturekit", "dep:videotoolbox", "dep:apple-cf"]
 
 [lib]
 name = "screenmirror_lib"
@@ -47,6 +47,8 @@ if-addrs = "0.7"
 core-foundation = "0.10"
 xcap = "0.9"
 screencapturekit = { version = "8.0.1", features = ["macos_13_0"], optional = true }
+videotoolbox = { version = "0.18.1", optional = true, default-features = true }
+apple-cf = { version = "0.9.3", optional = true }
 
 [dev-dependencies]
 tokio-tungstenite = "0.21"
