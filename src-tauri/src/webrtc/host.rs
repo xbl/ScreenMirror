@@ -8,12 +8,29 @@ use std::net::UdpSocket;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod tests {
+    use super::should_drop_encoded_frame;
+    use std::time::Duration;
+
+    #[test]
+    fn keeps_stale_keyframe_for_stream_start_but_drops_stale_delta() {
+        assert!(!should_drop_encoded_frame(Duration::from_millis(500), true));
+        assert!(should_drop_encoded_frame(Duration::from_millis(500), false));
+        assert!(!should_drop_encoded_frame(Duration::from_millis(50), false));
+    }
+}
+
 use parking_lot::Mutex;
 use str0m::media::{MediaKind, MediaTime, Mid};
 use str0m::net::Receive;
 use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 
 use crate::webrtc::{spawn_video_capture_loop, CaptureTarget, H264EncodedFrame, VideoFrameSink};
+
+fn should_drop_encoded_frame(age: Duration, keyframe: bool) -> bool {
+    age > Duration::from_millis(150) && !keyframe
+}
 
 /// Rewrite H.264 fmtp lines in an SDP so that `packetization-mode=<n>` is set
 /// to the requested value. Only H.264 payload-type fmtp lines are affected;
@@ -254,7 +271,7 @@ impl HostPeer {
                         if frame.data.is_empty() {
                             continue;
                         }
-                        if frame.captured_at.elapsed() > Duration::from_millis(150) {
+                        if should_drop_encoded_frame(frame.captured_at.elapsed(), frame.keyframe) {
                             tracing::debug!("host: dropping stale encoded frame");
                             continue;
                         }

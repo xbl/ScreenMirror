@@ -180,12 +180,18 @@ mod tests {
     use super::*;
     #[test]
     fn rejects_odd_dimensions() {
-        assert_eq!(IOSurfaceVideoEncoder::new(321, 240, 30, 1), Err(IOSurfaceEncoderError::InvalidDimensions(321, 240)));
+        assert!(matches!(
+            IOSurfaceVideoEncoder::new(321, 240, 30, 1),
+            Err(IOSurfaceEncoderError::InvalidDimensions(321, 240))
+        ));
     }
     #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
     #[test]
     fn default_build_reports_unsupported() {
         assert!(!is_available());
-        assert_eq!(IOSurfaceVideoEncoder::new(320, 240, 30, 500), Err(IOSurfaceEncoderError::Unsupported));
+        assert!(matches!(
+            IOSurfaceVideoEncoder::new(320, 240, 30, 500),
+            Err(IOSurfaceEncoderError::Unsupported)
+        ));
     }
 }
