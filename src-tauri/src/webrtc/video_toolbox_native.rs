@@ -130,6 +130,7 @@ impl NativeVideoEncoder {
             };
             (*ctx).gop_size = fps_c * 2;
             (*ctx).max_b_frames = 0;
+            (*ctx).delay = 0;
             (*ctx).flags |= av::AV_CODEC_FLAG_LOW_DELAY as c_int;
             (*ctx).codec_id = av::AVCodecID_AV_CODEC_ID_H264;
             // FF_PROFILE_H264_BASELINE = 66 (from H.264 spec profile_idc).
@@ -152,6 +153,7 @@ impl NativeVideoEncoder {
             // creation.
             let presets: &[(&str, &str)] = &[
                 ("realtime", "true"),
+                ("prio_speed", "true"),
                 ("allow_sw", "1"),
             ];
             for (k, v) in presets {
@@ -336,10 +338,18 @@ impl NativeVideoEncoder {
             (*self.frame_yuv).width = self.width as c_int;
             (*self.frame_yuv).height = self.height as c_int;
             (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
-            if self.force_keyframe_next {
+            let request_keyframe = self.force_keyframe_next;
+            if request_keyframe {
                 (*self.ctx).gop_size = 1;
                 (*self.frame_yuv).key_frame = 1;
                 (*self.frame_yuv).pict_type = av::AVPictureType_AV_PICTURE_TYPE_I;
+            } else {
+                // AVFrame metadata survives the data-plane unref. Clear the
+                // one-shot IDR request so every later frame can be a P-frame;
+                // leaving it set turns a high-resolution screen into a stream
+                // of expensive keyframes and quickly creates seconds of lag.
+                (*self.frame_yuv).key_frame = 0;
+                (*self.frame_yuv).pict_type = av::AVPictureType_AV_PICTURE_TYPE_NONE;
             }
 
             // Send each captured input exactly once. VideoToolbox can buffer
@@ -352,10 +362,28 @@ impl NativeVideoEncoder {
             if send_rc < 0 && !is_eagain(send_rc) {
                 return Err(format!("avcodec_send_frame: {}", av_err(send_rc)));
             }
+            if request_keyframe {
+                // The one-shot request applies only to this input. The
+                // encoder may return it several calls later, so queue
+                // selection below separately protects that pending IDR.
+                self.force_keyframe_next = false;
+                (*self.ctx).gop_size = self.fps.max(1) as c_int * 2;
+            }
             self.drain_packets(MAX_DRAIN)?;
 
-            if let Some(frame) = self.pending.pop_front() {
-                self.force_keyframe_next = false;
+            // If VideoToolbox releases several delayed packets at once, keep
+            // only the newest one. Sending the backlog would turn encoder
+            // startup or a transient stall into seconds of display latency.
+            let frame = if self.pending.iter().any(|frame| frame.keyframe) {
+                self.pending
+                    .iter()
+                    .position(|frame| frame.keyframe)
+                    .and_then(|index| self.pending.remove(index))
+            } else {
+                self.pending.pop_back()
+            };
+            self.pending.clear();
+            if let Some(frame) = frame {
                 (*self.ctx).gop_size = self.fps.max(1) as c_int * 2;
                 Ok(frame)
             } else {

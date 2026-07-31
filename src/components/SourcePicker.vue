@@ -33,6 +33,14 @@
         <span class="sp-text">{{ t('source.window') }}</span>
       </label>
     </div>
+    <label class="sp-quality">
+      <span class="sp-quality-label">{{ t('source.quality') }}</span>
+      <select v-model="quality" @change="onChange">
+        <option value="balanced">{{ t('source.qualityBalanced') }}</option>
+        <option value="high">{{ t('source.qualityHigh') }}</option>
+        <option value="ultra">{{ t('source.qualityUltra') }}</option>
+      </select>
+    </label>
   </section>
 </template>
 
@@ -44,6 +52,9 @@ import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionMo
 
 const { t } = useI18n();
 const source = ref<'screen' | 'window'>('screen');
+const quality = ref<'balanced' | 'high' | 'ultra'>('high');
+
+const qualityValue = () => ({ balanced: 0.5, high: 0.75, ultra: 1.0 }[quality.value]);
 
 const permissionModal = inject<ProvidedPermissionModal>(
   PermissionModalKey,
@@ -68,7 +79,7 @@ async function onChange() {
     const first = sources.find((s) => s.kind === source.value);
     if (!first) return;
     const idx = parseInt(first.id.split(':')[1] ?? '0', 10);
-    await api.setCaptureTarget({ kind: source.value, id: idx, quality: 1.0 });
+    await api.setCaptureTarget({ kind: source.value, id: idx, quality: qualityValue() });
   } catch {
     /* tolerate: when running outside Tauri, just remember the choice */
   }
@@ -173,5 +184,23 @@ onMounted(() => {
 
 .sp-text {
   font-weight: 500;
+}
+
+.sp-quality {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+.sp-quality select {
+  min-width: 150px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 </style>

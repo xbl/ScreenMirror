@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
                 screenmirror_lib::webrtc::CaptureKind::Screen
             },
             id: 0,
-            quality: 0.5,
+            quality: 0.75,
         };
         *capture_target.lock() = Some(target);
         tracing::info!("capture target set: {:?}", target);

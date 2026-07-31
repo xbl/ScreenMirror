@@ -3,12 +3,6 @@
     <button class="play" @click="$emit('play-pause')">
       {{ playing ? t('controls.pause') : t('controls.play') }}
     </button>
-    <label>
-      {{ t('controls.quality') }}:
-      <select :value="quality" @change="onQuality">
-        <option v-for="q in qualities" :key="q" :value="q">{{ q }}</option>
-      </select>
-    </label>
     <button @click="$emit('fullscreen')">{{ t('controls.fullscreen') }}</button>
   </div>
 </template>
@@ -17,18 +11,11 @@
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
-const qualities = ['100%', '80%', '60%', '40%', '25%'] as const;
-
-defineProps<{ playing: boolean; quality: string }>();
-const emit = defineEmits<{
+defineProps<{ playing: boolean }>();
+defineEmits<{
   (e: 'play-pause'): void;
-  (e: 'quality', v: string): void;
   (e: 'fullscreen'): void;
 }>();
-
-function onQuality(ev: Event) {
-  emit('quality', (ev.target as HTMLSelectElement).value);
-}
 </script>
 
 <style scoped>

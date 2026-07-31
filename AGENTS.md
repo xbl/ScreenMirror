@@ -16,6 +16,28 @@ No Electron. No analytics. English + Simplified Chinese only.
 - Viewer: SPA loaded by the browser (`viewer/`).
 - Media: `xcap` capture → VideoToolbox H.264 → `str0m` WebRTC → native `<video>`.
 
+## Product Positioning & Priorities
+
+Screenmirror is a **local-network extended-display tool**: any device that can
+open a browser should be usable as a responsive second screen. Treat the LAN as
+the normal deployment environment, not as a constrained WAN link.
+
+- Optimize for interactive latency first; target end-to-end motion-to-photon
+  latency below 500 ms.
+- Prefer dropping stale frames over displaying an old frame. Do not add large
+  jitter, playback, or encoder queues to make motion look smoother.
+- Use the available LAN bandwidth for readable text and high-resolution screen
+  content. Preserve at least 30 fps when the host can sustain it.
+- Quality controls belong on the host, where capture and H.264 settings are
+  decided. Viewer controls must not pretend to change encoding unless they
+  renegotiate the stream.
+- Validate latency with a moving clock or timer on the host and viewer, not
+  only with a successful WebRTC connection or a rendered test pattern.
+- On macOS, seed each stream with one direct `capture_image()` frame, then use
+  `video_recorder()` for ongoing changes. This avoids recorder startup starvation
+  while preserving higher throughput; set `SCREENMIRROR_USE_VIDEO_RECORDER=0`
+  to force direct polling for diagnostics.
+
 ## Sub-projects (work in both, treat as one product)
 
 | Sub-project | Path | Manager |
@@ -136,7 +158,21 @@ npm run build                                        # may fail with rollup nati
 node tools/verify-fix.js
 # Expect: "VERDICT: ✅ Frames rendered AND canvas has visible non-black pixels"
 # Exit 0 = pass, 1 = fail. Screenshot lands at tools/output/verify-fix.png.
+
+# Deep headless diagnostic: captures WebRTC stats and first-change timing
+node tools/diag-frames-direct.js
+# Prefer this for latency/no-frame investigations; it does not require opening
+# the Tauri UI. It writes tools/output/diag-direct-trace.json and screenshots.
 ```
+
+Headless verification is the default for media changes. `diag-frames-direct.js`
+starts the real Tauri binary and a fresh headless Chrome profile, then records
+`framesDecoded`, jitter-buffer delay, packet loss, and the first decoded change.
+For the extended-display target, validate latency with a moving host clock or
+timer rather than treating a successful WebRTC handshake as proof of quality.
+Always rebuild `viewer/dist/` before trusting headless output. If Vite/Rollup
+fails because an optional native dependency is missing, treat any existing
+`viewer/dist/` as stale and do not claim the new viewer code was verified.
 
 The pre-existing warnings, in case a reviewer flags them as new:
 

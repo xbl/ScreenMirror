@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const TAURI_BIN = path.join(ROOT, 'src-tauri', 'target', 'debug', 'screenmirror');
+const TAURI_BIN = process.env.SCREENMIRROR_TAURI_BIN
+  ?? path.join(ROOT, 'src-tauri', 'target', 'debug', 'screenmirror');
 const VIEWER_DIST = path.join(ROOT, 'viewer', 'dist');
 const OUT_DIR = path.join(__dirname, 'output');
 const ROOM_ID = 'diag-direct';
@@ -83,8 +84,10 @@ async function main() {
       SCREENMIRROR_TEST_ROOM: ROOM_ID,
       SCREENMIRROR_CAPTURE: process.env.SCREENMIRROR_CAPTURE ?? 'test',
       SCREENMIRROR_E2E_AUTO_APPROVE: '1',
-      SCREENMIRROR_MAX_DIM: process.env.SCREENMIRROR_MAX_DIM ?? '960',
-      SCREENMIRROR_CAPTURE_QUALITY: '0.3',
+      // Keep the diagnostic aligned with the selected product profile. Use
+      // explicit env overrides when a smaller/faster test pattern is wanted.
+      SCREENMIRROR_MAX_DIM: process.env.SCREENMIRROR_MAX_DIM ?? '2560',
+      SCREENMIRROR_CAPTURE_QUALITY: process.env.SCREENMIRROR_CAPTURE_QUALITY ?? '0.75',
       VIEWER_DIST,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

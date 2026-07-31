@@ -36,6 +36,14 @@ async function startNegotiation() {
   (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
+    // This viewer is an interactive LAN display, not a buffered playback
+    // client. Keep Chrome's receive jitter buffer close to real time; packets
+    // that arrive too late should be dropped instead of adding seconds of lag.
+    try {
+      event.receiver.jitterBufferTarget = 50;
+    } catch {
+      // Older browsers may expose the property as read-only or not support it.
+    }
     const stream = event.streams[0] ?? new MediaStream([event.track]);
     console.log('[early-offer] video track received', event.track.kind);
     window.dispatchEvent(new CustomEvent('viewer-stream', { detail: stream }));

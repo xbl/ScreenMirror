@@ -22,6 +22,10 @@ export default {
     screen: '整个屏幕',
     window: '应用窗口',
     refresh: '刷新源',
+    quality: '画质',
+    qualityBalanced: '平衡 · 1920px',
+    qualityHigh: '高画质 · 2560px',
+    qualityUltra: '超清 · 3840px',
   },
   start: {
     idle: '开始分享',

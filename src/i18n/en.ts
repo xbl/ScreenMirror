@@ -22,6 +22,10 @@ export default {
     screen: 'Entire screen',
     window: 'Application window',
     refresh: 'Refresh sources',
+    quality: 'Quality',
+    qualityBalanced: 'Balanced · 1920px',
+    qualityHigh: 'High · 2560px',
+    qualityUltra: 'Ultra · 3840px',
   },
   start: {
     idle: 'Start sharing',

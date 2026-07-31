@@ -328,11 +328,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                         Some(crate::webrtc::CaptureTarget {
                                             kind: crate::webrtc::CaptureKind::Screen,
                                             id: 0,
-                                            quality: 1.0,
+                                            quality: 0.75,
                                         })
                                     });
                                     if let (Some(target), Some(peer)) = (target, peer_opt) {
-                                        if let Err(e) = peer.start_sharing(target, 15) {
+                                        if let Err(e) = peer.start_sharing(target, 30) {
                                             tracing::error!("start_sharing: {e}");
                                         }
                                     }

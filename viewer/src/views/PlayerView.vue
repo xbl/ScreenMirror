@@ -3,9 +3,7 @@
     <PlayerControlPanel
       v-if="status === 'streaming'"
       :playing="playing"
-      :quality="quality"
       @play-pause="togglePlay"
-      @quality="setQuality"
       @fullscreen="toggleFullscreen"
     />
     <video
@@ -66,7 +64,6 @@ const { t } = useI18n();
 const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
 
 const playing = ref(true);
-const quality = ref('100%');
 const videoEl = ref<HTMLVideoElement | null>(null);
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
@@ -94,10 +91,6 @@ function togglePlay() {
     console.error('[player-view] play() rejected:', err);
   });
   else videoEl.value.pause();
-}
-
-function setQuality(q: string) {
-  quality.value = q;
 }
 
 function toggleFullscreen() {

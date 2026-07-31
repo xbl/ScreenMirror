@@ -227,7 +227,7 @@ pub fn set_capture_target(
     *state.capture_target.lock() = Some(crate::webrtc::CaptureTarget {
         kind,
         id: args.id,
-        quality: args.quality.unwrap_or(0.5),
+        quality: args.quality.unwrap_or(0.75),
     });
     Ok(())
 }
