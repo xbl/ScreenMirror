@@ -406,11 +406,13 @@ pub fn spawn_video_capture_loop(
         } else {
             None
         };
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "screenkit"))]
         let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen)
             && std::env::var("SCREENMIRROR_USE_IOSURFACE")
                 .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
+        #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
+        let use_screenkit_capture = false;
         #[cfg(target_os = "macos")]
         let mut screen_capture = {
             // On some macOS versions video_recorder() is change-driven and
@@ -469,6 +471,8 @@ pub fn spawn_video_capture_loop(
         #[cfg(not(target_os = "macos"))]
         let mut screen_capture: Option<()> = None;
         #[cfg(not(target_os = "macos"))]
+        let mut screenkit_capture: Option<ScreenKitCapture> = None;
+        #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {

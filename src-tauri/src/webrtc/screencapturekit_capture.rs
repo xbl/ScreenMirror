@@ -44,7 +44,7 @@ pub enum ScreenKitError {
 pub struct ScreenKitCapture {
     frames: Arc<Mutex<Receiver<ScreenKitFrame>>>,
     stopped: Arc<AtomicBool>,
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "screenkit"))]
     stream: Arc<Mutex<Option<screencapturekit::stream::sc_stream::SCStream>>>,
 }
 
@@ -56,7 +56,7 @@ impl ScreenKitCapture {
         Self {
             frames: Arc::new(Mutex::new(frames)),
             stopped,
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "screenkit"))]
             stream: Arc::new(Mutex::new(None)),
         }
     }
@@ -91,7 +91,7 @@ impl ScreenKitCapture {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "screenkit"))]
 impl Drop for ScreenKitCapture {
     fn drop(&mut self) {
         self.stop();
@@ -103,7 +103,7 @@ impl Drop for ScreenKitCapture {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "screenkit"))]
 pub fn start_screen_capture(
     target: CaptureTarget,
     fps: u32,
@@ -215,7 +215,7 @@ pub fn start_screen_capture(
     Ok(capture)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "screenkit")))]
 pub fn start_screen_capture(
     _target: CaptureTarget,
     _fps: u32,
