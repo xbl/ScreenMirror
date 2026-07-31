@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri:dev": "SCREENMIRROR_USE_IOSURFACE=1 tauri dev --features screenkit",
+    "tauri:build": "SCREENMIRROR_USE_IOSURFACE=1 tauri build --features screenkit",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.js"
