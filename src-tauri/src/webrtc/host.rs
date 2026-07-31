@@ -15,8 +15,9 @@ mod tests {
 
     #[test]
     fn keeps_stale_keyframe_for_stream_start_but_drops_stale_delta() {
-        assert!(!should_drop_encoded_frame(Duration::from_millis(500), true));
-        assert!(should_drop_encoded_frame(Duration::from_millis(500), false));
+        assert!(!should_drop_encoded_frame(Duration::from_millis(500), false));
+        assert!(should_drop_encoded_frame(Duration::from_millis(600), false));
+        assert!(!should_drop_encoded_frame(Duration::from_millis(600), true));
         assert!(!should_drop_encoded_frame(Duration::from_millis(50), false));
     }
 }
@@ -29,7 +30,7 @@ use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 use crate::webrtc::{spawn_video_capture_loop, CaptureTarget, H264EncodedFrame, VideoFrameSink};
 
 fn should_drop_encoded_frame(age: Duration, keyframe: bool) -> bool {
-    age > Duration::from_millis(150) && !keyframe
+    age > Duration::from_millis(500) && !keyframe
 }
 
 /// Rewrite H.264 fmtp lines in an SDP so that `packetization-mode=<n>` is set

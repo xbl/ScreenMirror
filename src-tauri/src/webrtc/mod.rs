@@ -429,7 +429,10 @@ pub fn spawn_video_capture_loop(
                 Ok(mut encoded) => {
                     encoded_count = encoded_count.wrapping_add(1);
                     encoded.captured_at = frame.captured_at;
-                    if encoded.captured_at.elapsed() <= Duration::from_millis(150) || encoded.keyframe {
+                    // Native VideoToolbox may spend 300-400ms producing a frame on
+                    // high-resolution displays. Keep that bounded-latency frame
+                    // rather than starving the viewer after its first keyframe.
+                    if encoded.captured_at.elapsed() <= Duration::from_millis(500) || encoded.keyframe {
                         encoder_sink(encoded);
                     }
                 }
