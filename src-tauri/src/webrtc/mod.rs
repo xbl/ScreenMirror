@@ -1,7 +1,7 @@
 //! Screen capture -> H.264 -> RTP via str0m.
 
 use image::RgbaImage;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -296,6 +296,50 @@ pub fn spawn_video_capture_loop(
     let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
+    let (frame_tx, frame_rx) = sync_channel::<CapturedFrame>(1);
+    let encoder_running = running.clone();
+    let encoder_sink = sink.clone();
+    std::thread::spawn(move || {
+        let mut encoder: Option<VideoEncoder> = None;
+        let mut encoded_count = 0u32;
+        while encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
+            let mut frame = match frame_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(frame) => frame,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            while let Ok(newer) = frame_rx.try_recv() {
+                frame = newer;
+            }
+            let dimensions = (frame.rgba.width(), frame.rgba.height());
+            if encoder.is_none() {
+                let kbps = capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
+                match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
+                    Ok(value) => encoder = Some(value),
+                    Err(error) => {
+                        tracing::warn!("video encoder initialization failed: {error}");
+                        continue;
+                    }
+                }
+            }
+            let encode_started = std::time::Instant::now();
+            let result = encoder.as_mut().unwrap().encode(frame.rgba.as_raw());
+            let elapsed = encode_started.elapsed();
+            if encoded_count < 3 || elapsed >= Duration::from_millis(100) {
+                tracing::info!("video encode dimensions={}x{} elapsed={:?}", dimensions.0, dimensions.1, elapsed);
+            }
+            match result {
+                Ok(mut encoded) => {
+                    encoded_count = encoded_count.wrapping_add(1);
+                    encoded.captured_at = frame.captured_at;
+                    if encoded.captured_at.elapsed() <= Duration::from_millis(150) || encoded.keyframe {
+                        encoder_sink(encoded);
+                    }
+                }
+                Err(error) => tracing::warn!("H.264 encode error: {error}"),
+            }
+        }
+    });
     tracing::info!(
         "video capture loop spawned target={:?} fps={fps} interval={:?}",
         target,
@@ -355,7 +399,6 @@ pub fn spawn_video_capture_loop(
         };
         #[cfg(not(target_os = "macos"))]
         let mut screen_capture: Option<()> = None;
-        let mut encoder_slot: Option<std::sync::Mutex<Option<VideoEncoder>>> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             let frame_index = frames;
@@ -404,75 +447,16 @@ pub fn spawn_video_capture_loop(
             }
             match captured {
                 Ok(frame) => {
-                    let dimensions = (frame.rgba.width(), frame.rgba.height());
-                    let kbps = capture_bitrate_kbps(
-                        dimensions.0,
-                        dimensions.1,
-                        fps,
-                        target.quality,
-                    );
-                    if encoder_slot.is_none() {
-                        encoder_slot = Some(std::sync::Mutex::new(None));
-                    }
-                    let encode_started = std::time::Instant::now();
-                    let result = {
-                        let mut guard = encoder_slot.as_mut().unwrap().lock().unwrap();
-                        if guard.is_none() {
-                            match VideoEncoder::new(
-                                dimensions.0,
-                                dimensions.1,
-                                fps.max(1),
-                                kbps as u32,
-                            ) {
-                                Ok(value) => *guard = Some(value),
-                                Err(error) => {
-                                    tracing::warn!("video encoder initialization failed: {error}");
-                                    drop(guard);
-                                    std::thread::sleep(interval);
-                                    continue;
-                                }
-                            }
+                    frames = frames.wrapping_add(1);
+                    match frame_tx.try_send(frame) {
+                        Ok(()) => {}
+                        Err(TrySendError::Full(newest)) => {
+                            // The encoder thread drains the channel and keeps
+                            // the newest available frame; never block capture
+                            // waiting for a slow encode.
+                            drop(newest);
                         }
-                        let encoded = guard.as_mut().unwrap().encode(frame.rgba.as_raw());
-                        encoded
-                    };
-                    let encode_elapsed = encode_started.elapsed();
-                    if frames < 3 || encode_elapsed >= Duration::from_millis(100) {
-                        tracing::info!(
-                            "video capture: encode dimensions={}x{} elapsed={:?}",
-                            dimensions.0,
-                            dimensions.1,
-                            encode_elapsed
-                        );
-                    }
-                    match result {
-                        Ok(encoded) => {
-                            frames = frames.wrapping_add(1);
-                            let captured_at = frame.captured_at;
-                            if frames <= 3 {
-                                tracing::info!(
-                                    "video capture: encoded frame #{} bytes={} keyframe={}",
-                                    frames,
-                                    encoded.data.len(),
-                                    encoded.keyframe,
-                                );
-                            }
-                            // The encoder may return a packet that was buffered
-                            // during startup; timestamp it with the source frame
-                            // so the sender can discard stale output.
-                            let mut encoded = encoded;
-                            encoded.captured_at = captured_at;
-                            if frames % 30 == 1 {
-                                tracing::info!(
-                                    "video capture: encoded frame #{} ({} bytes, keyframe={})",
-                                    frames,
-                                    encoded.data.len(),
-                                    encoded.keyframe
-                                );
-                            }
-                            sink(encoded);
-                        }
-                        Err(error) => tracing::warn!("H.264 encode error: {error}"),
+                        Err(TrySendError::Disconnected(_)) => break,
                     }
                 }
                 Err(error) => tracing::warn!("capture error: {error}"),
