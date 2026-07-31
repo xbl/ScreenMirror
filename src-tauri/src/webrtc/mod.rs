@@ -138,7 +138,10 @@ fn normalize_captured_rgba_with_max_dim(rgba: RgbaImage, max_dim: u32) -> RgbaIm
 fn profile_max_dim(quality: f32) -> u32 {
     match quality {
         q if q >= 0.9 => 3840,
-        q if q >= 0.65 => 2560,
+        // 2560px capture can intermittently block VideoToolbox for hundreds
+        // of milliseconds on macOS, causing seconds of stale-frame buildup.
+        // Keep High readable and responsive; Ultra opts into the larger frame.
+        q if q >= 0.65 => 1920,
         _ => 1920,
     }
 }
@@ -490,7 +493,7 @@ mod tests {
     #[test]
     fn quality_profiles_raise_resolution_progressively() {
         assert_eq!(profile_max_dim(0.5), 1920);
-        assert_eq!(profile_max_dim(0.75), 2560);
+        assert_eq!(profile_max_dim(0.75), 1920);
         assert_eq!(profile_max_dim(1.0), 3840);
     }
 

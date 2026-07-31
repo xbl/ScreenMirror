@@ -36,11 +36,13 @@ async function startNegotiation() {
   (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
-    // This viewer is an interactive LAN display, not a buffered playback
-    // client. Keep Chrome's receive jitter buffer close to real time; packets
-    // that arrive too late should be dropped instead of adding seconds of lag.
+    // Both receive-side delay knobs use seconds (not milliseconds). Keep this
+    // interactive LAN display close to real time; late packets should be
+    // dropped instead of adding seconds of lag.
     try {
-      event.receiver.jitterBufferTarget = 50;
+      event.receiver.jitterBufferTarget = 0;
+      const receiver = event.receiver as RTCRtpReceiver & { playoutDelayHint?: number };
+      if ('playoutDelayHint' in receiver) receiver.playoutDelayHint = 0;
     } catch {
       // Older browsers may expose the property as read-only or not support it.
     }

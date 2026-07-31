@@ -132,7 +132,12 @@ async fn spa_fallback(State(state): State<AppState>, path: Option<Path<String>>)
     }
     let index = state.viewer_path.join("index.html");
     match tokio::fs::read(&index).await {
-        Ok(bytes) => (StatusCode::OK, [("content-type", "text/html")], bytes).into_response(),
+        Ok(bytes) => (
+            StatusCode::OK,
+            [("content-type", "text/html"), ("cache-control", "no-store")],
+            bytes,
+        )
+            .into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "viewer bundle missing").into_response(),
     }
 }
@@ -140,7 +145,12 @@ async fn spa_fallback(State(state): State<AppState>, path: Option<Path<String>>)
 async fn serve_root(State(state): State<AppState>) -> Response {
     let index = state.viewer_path.join("index.html");
     match tokio::fs::read(&index).await {
-        Ok(bytes) => (StatusCode::OK, [("content-type", "text/html")], bytes).into_response(),
+        Ok(bytes) => (
+            StatusCode::OK,
+            [("content-type", "text/html"), ("cache-control", "no-store")],
+            bytes,
+        )
+            .into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "viewer dist not found").into_response(),
     }
 }

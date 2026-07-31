@@ -28,9 +28,16 @@ the normal deployment environment, not as a constrained WAN link.
   jitter, playback, or encoder queues to make motion look smoother.
 - Use the available LAN bandwidth for readable text and high-resolution screen
   content. Preserve at least 30 fps when the host can sustain it.
+- The default High profile is capped at 1920px because larger VideoToolbox
+  frames can block encoding for hundreds of milliseconds; Ultra is opt-in for
+  higher resolution when the host can sustain it.
 - Quality controls belong on the host, where capture and H.264 settings are
   decided. Viewer controls must not pretend to change encoding unless they
   renegotiate the stream.
+- WebRTC receiver delay properties use seconds: `jitterBufferTarget = 0.05`
+  means 50 ms, while `0` requests no target buffering. Pair it with
+  `playoutDelayHint = 0` when supported; never use a millisecond integer such
+  as `50`.
 - Validate latency with a moving clock or timer on the host and viewer, not
   only with a successful WebRTC connection or a rendered test pattern.
 - On macOS, seed each stream with one direct `capture_image()` frame, then use
