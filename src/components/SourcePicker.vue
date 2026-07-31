@@ -68,7 +68,7 @@ async function onChange() {
     const first = sources.find((s) => s.kind === source.value);
     if (!first) return;
     const idx = parseInt(first.id.split(':')[1] ?? '0', 10);
-    await api.setCaptureTarget({ kind: source.value, id: idx, quality: 0.5 });
+    await api.setCaptureTarget({ kind: source.value, id: idx, quality: 1.0 });
   } catch {
     /* tolerate: when running outside Tauri, just remember the choice */
   }

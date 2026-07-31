@@ -328,7 +328,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                         Some(crate::webrtc::CaptureTarget {
                                             kind: crate::webrtc::CaptureKind::Screen,
                                             id: 0,
-                                            quality: 0.5,
+                                            quality: 1.0,
                                         })
                                     });
                                     if let (Some(target), Some(peer)) = (target, peer_opt) {

@@ -108,11 +108,8 @@ fn resize_rgba_nearest(rgba: &RgbaImage, width: u32, height: u32) -> RgbaImage {
     RgbaImage::from_raw(width, height, dst).expect("nearest resize dimensions match buffer")
 }
 
-fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
-    let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(960);
+fn normalize_captured_rgba_with_max_dim(rgba: RgbaImage, max_dim: u32) -> RgbaImage {
+    let max_dim = max_dim.max(2);
     let rgba = if rgba.width() > max_dim || rgba.height() > max_dim {
         let scale = max_dim as f32 / rgba.width().max(rgba.height()) as f32;
         let nw = ((rgba.width() as f32) * scale).round().max(1.0) as u32;
@@ -127,6 +124,24 @@ fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
     } else {
         rgba
     }
+}
+
+fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
+    let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1920);
+    normalize_captured_rgba_with_max_dim(rgba, max_dim)
+}
+
+fn capture_bitrate_kbps(width: u32, height: u32, fps: u32, quality: f32) -> u32 {
+    let pixels = u64::from(width) * u64::from(height);
+    let quality = quality.clamp(0.25, 1.0);
+    // Screen text needs more bits than camera video. At quality=1 this is
+    // about 3.7 Mbps for 1080p15, while retaining the existing frame rate.
+    let kbps = ((pixels as f64 * fps.max(1) as f64 * 12.0 * quality as f64) / 100_000.0)
+        .round() as u64;
+    kbps.clamp(1_200, 20_000) as u32
 }
 
 fn captured_frame_from_rgba(rgba: RgbaImage) -> CapturedFrame {
@@ -330,10 +345,12 @@ pub fn spawn_video_capture_loop(
             match captured {
                 Ok(frame) => {
                     let dimensions = (frame.rgba.width(), frame.rgba.height());
-                    let pixels = (dimensions.0 as u64) * (dimensions.1 as u64);
-                    let kbps = ((pixels * fps.max(1) as u64 * 6) / 1000 / 100)
-                        .max(500)
-                        .min(20000);
+                    let kbps = capture_bitrate_kbps(
+                        dimensions.0,
+                        dimensions.1,
+                        fps,
+                        target.quality,
+                    );
                     if encoder_slot.is_none() {
                         encoder_slot = Some(std::sync::Mutex::new(None));
                     }
@@ -396,7 +413,8 @@ pub struct CaptureHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_encoder_dimensions;
+    use super::{capture_bitrate_kbps, normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions};
+    use image::RgbaImage;
 
     #[test]
     fn normalizes_odd_capture_dimensions_for_video_encoder() {
@@ -407,6 +425,18 @@ mod tests {
     #[test]
     fn preserves_even_capture_dimensions() {
         assert_eq!(normalize_encoder_dimensions(1920, 1248), (1920, 1248));
+    }
+
+    #[test]
+    fn high_resolution_capture_is_not_reduced_to_low_definition() {
+        let frame = normalize_captured_rgba_with_max_dim(RgbaImage::new(1920, 1080), 1920);
+        assert_eq!((frame.width(), frame.height()), (1920, 1080));
+    }
+
+    #[test]
+    fn screen_bitrate_scales_for_readable_text_without_lowering_fps() {
+        assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) >= 3_500);
+        assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) > capture_bitrate_kbps(960, 540, 15, 1.0));
     }
 }
 

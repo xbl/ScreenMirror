@@ -78,7 +78,7 @@ pub fn run() {
             quality: std::env::var("SCREENMIRROR_CAPTURE_QUALITY")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(0.3),
+                .unwrap_or(1.0),
         };
         *capture_target.lock() = Some(target);
         tracing::info!("capture target set: {:?}", target);
