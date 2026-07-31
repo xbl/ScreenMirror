@@ -95,7 +95,7 @@ fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
     let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1280);
+        .unwrap_or(640);
     let rgba = if rgba.width() > max_dim || rgba.height() > max_dim {
         let scale = max_dim as f32 / rgba.width().max(rgba.height()) as f32;
         let nw = ((rgba.width() as f32) * scale).round().max(1.0) as u32;

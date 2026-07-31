@@ -13,7 +13,7 @@
  *   5. Print a structured trace so we can pinpoint the actual root cause
  *      instead of guessing from the symptom.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import http from 'node:http';
 import puppeteer from 'puppeteer-core';
@@ -159,12 +159,35 @@ async function main() {
     console.log(`[diag] navigating to ${BASE}/${ROOM_ID}`);
     await page.goto(`${BASE}/${ROOM_ID}`, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log(`[diag] page loaded at +${Date.now() - t0}ms`);
+    let baseline = null;
+    const baselineDeadline = Date.now() + 8000;
+    while (!baseline && Date.now() < baselineDeadline) {
+      baseline = await page.evaluate(() => {
+        const v = document.querySelector('video.frame');
+        if (!v || v.videoWidth === 0) return null;
+        const c = document.createElement('canvas');
+        c.width = v.videoWidth;
+        c.height = v.videoHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        let signature = 0;
+        for (let i = 0; i < data.length; i += 64) signature = (signature + data[i] * 3 + data[i + 1] * 5 + data[i + 2] * 7) >>> 0;
+        return { signature };
+      });
+      if (!baseline) await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    console.log(`[diag] baseline signature=${baseline?.signature ?? 'unavailable'} at +${Date.now() - t0}ms`);
+    const changeTriggeredAt = Date.now() - t0;
+    const calculator = spawnSync('open', ['-a', 'Calculator'], { encoding: 'utf8' });
+    console.log(`[diag] desktop change triggered at +${changeTriggeredAt}ms (open Calculator status=${calculator.status})`);
 
     // Poll every 200ms for 15s — capture state evolution
     const trace = [];
     let pixelSample = null;
+    let firstChangedAt = 0;
     while (Date.now() - t0 < 15000) {
-      const snap = await page.evaluate(() => {
+      const snap = await page.evaluate(async () => {
         const v = document.querySelector('video.frame');
         const snap = {
           hasVideo: !!v,
@@ -182,6 +205,23 @@ async function main() {
           smVideoTrack: window.__smVideoTrack === true,
           smPcState: window.__smPc?.connectionState ?? null,
           smPcIce: window.__smPc?.iceConnectionState ?? null,
+          receiverStats: await (async () => {
+            const pc = window.__smPc;
+            if (!pc) return null;
+            const reports = await pc.getStats();
+            for (const report of reports.values()) {
+              if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                return {
+                  framesDecoded: report.framesDecoded ?? 0,
+                  framesReceived: report.framesReceived ?? 0,
+                  jitterBufferDelay: report.jitterBufferDelay ?? 0,
+                  jitterBufferEmittedCount: report.jitterBufferEmittedCount ?? 0,
+                  packetsLost: report.packetsLost ?? 0,
+                };
+              }
+            }
+            return null;
+          })(),
         };
         if (v && v.videoWidth > 0 && v.videoHeight > 0) {
           try {
@@ -192,14 +232,16 @@ async function main() {
             ctx.drawImage(v, 0, 0, c.width, c.height);
             const img = ctx.getImageData(0, 0, c.width, c.height).data;
             let mr = 0, mg = 0, mb = 0, nonBlack = 0;
+            let signature = 0;
             for (let i = 0; i < img.length; i += 16) {
               const r = img[i], g = img[i + 1], b = img[i + 2];
+              signature = (signature + r * 3 + g * 5 + b * 7) >>> 0;
               if (r > mr) mr = r;
               if (g > mg) mg = g;
               if (b > mb) mb = b;
               if (r > 16 || g > 16 || b > 16) nonBlack++;
             }
-            snap.pixelStats = { maxR: mr, maxG: mg, maxB: mb, nonBlack };
+            snap.pixelStats = { maxR: mr, maxG: mg, maxB: mb, nonBlack, signature };
           } catch (e) {
             snap.pixelStats = { error: e.message };
           }
@@ -215,6 +257,10 @@ async function main() {
           (snap.pixelStats.maxR > 32 || snap.pixelStats.maxG > 32 || snap.pixelStats.maxB > 32)) {
         ev.push(`pixR=${snap.pixelStats.maxR}G=${snap.pixelStats.maxG}B=${snap.pixelStats.maxB}n=${snap.pixelStats.nonBlack}`);
         if (!pixelSample) pixelSample = { tMs: Date.now() - t0, ...snap.pixelStats };
+      }
+      if (snap.pixelStats && baseline && !firstChangedAt && snap.pixelStats.signature !== baseline.signature) {
+        firstChangedAt = Date.now() - t0;
+        console.log(`[diag] first changed decoded frame at +${firstChangedAt}ms; latency=${firstChangedAt - changeTriggeredAt}ms`);
       }
       if (snap.statusPill) ev.push(`pill=${snap.statusPill}`);
       if (snap.hasDisconnected) ev.push(`disconnect("${snap.noFramesText}")`);
