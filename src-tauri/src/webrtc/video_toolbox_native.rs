@@ -47,6 +47,7 @@ pub struct NativeVideoEncoder {
     /// step. We absorb the lag here so `encode()` still returns exactly
     /// one frame per call.
     pending: std::collections::VecDeque<H264EncodedFrame>,
+    force_keyframe_next: bool,
 }
 
 fn cstr(s: &str) -> CString {
@@ -222,34 +223,8 @@ impl NativeVideoEncoder {
                 sps_pps,
                 next_pts: 0,
                 pending: std::collections::VecDeque::new(),
+                force_keyframe_next: true,
             };
-
-            // Prime the encoder with several warm-up frames so the very
-            // first real `encode` call has output available. The
-            // h264_videotoolbox internal delay at session startup is
-            // higher than steady-state (session warm-up plus rate
-            // control), and VideoToolbox may need 4-8 sends before its
-            // first packet. We send `PRIME_FRAMES` discard frames here;
-            // their output goes through `drain_packets` into `pending`
-            // for the first real `encode` call to return. We keep
-            // priming until at least one packet is queued so the
-            // caller never sees "encoder buffering" on call #1.
-            //
-            // We deliberately do NOT call `extract_sps_pps` after
-            // priming — SPS/PPS are only emitted alongside the first IDR
-            // packet, and `sps_pps` is already populated from
-            // `avcodec_open2`'s extradata (which is set on the context
-            // before the first frame and contains the same parameter
-            // set).
-            const PRIME_FRAMES_PER_ROUND: i64 = 4;
-            const MAX_PRIME_ROUNDS: i32 = 6;
-            const MAX_DRAIN_PRIME: i32 = 64;
-            for _ in 0..MAX_PRIME_ROUNDS {
-                enc.prime_with_discards(PRIME_FRAMES_PER_ROUND, MAX_DRAIN_PRIME)?;
-                if !enc.pending.is_empty() {
-                    break;
-                }
-            }
 
             Ok(enc)
         }
@@ -291,75 +266,6 @@ impl NativeVideoEncoder {
                 return Err(format!("avcodec_receive_packet: {}", av_err(rc)));
             }
         }
-        Ok(())
-    }
-
-    /// Send `n` synthetic frames through the encoder to consume its
-    /// internal buffering delay. Output packets are absorbed into
-    /// `self.pending` for the next real `encode` call. We use the
-    /// existing `buf_rgba`/`buf_yuv` buffers (which are zeroed) and
-    /// rewire the YUV frame the same way `encode` does.
-    unsafe fn prime_with_discards(&mut self, n: i64, max_drain: i32) -> Result<(), String> {
-        let width_c = self.width as c_int;
-        let height_c = self.height as c_int;
-
-        let src_linesize = [width_c * 4, 0, 0, 0];
-        let dst_linesize = [width_c, width_c / 2, width_c / 2, 0];
-        let src_ptr = [
-            self.buf_rgba.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-        ];
-        let y_size = (self.width as usize) * (self.height as usize);
-        let uv_size = y_size / 4;
-        let dst_ptrs: [*mut u8; 4] = [
-            self.buf_yuv.as_mut_ptr(),
-            self.buf_yuv.as_mut_ptr().add(y_size),
-            self.buf_yuv.as_mut_ptr().add(y_size + uv_size),
-            std::ptr::null_mut(),
-        ];
-
-        for _ in 0..n {
-            av::av_frame_unref(self.frame_yuv);
-            av::av_packet_unref(self.packet);
-
-            // Scale the (currently zeroed) RGBA buffer into YUV so the
-            // encoder has valid plane pointers to read from.
-            let h = av::sws_scale(
-                self.sws,
-                src_ptr.as_ptr(),
-                src_linesize.as_ptr(),
-                0,
-                height_c,
-                dst_ptrs.as_ptr() as *const *mut u8,
-                dst_linesize.as_ptr(),
-            );
-            if h != height_c {
-                return Err(format!("sws_scale returned {h}, expected {height_c}"));
-            }
-
-            (*self.frame_yuv).data[0] = self.buf_yuv.as_mut_ptr();
-            (*self.frame_yuv).data[1] = self.buf_yuv.as_mut_ptr().add(y_size);
-            (*self.frame_yuv).data[2] = self.buf_yuv.as_mut_ptr().add(y_size + uv_size);
-            (*self.frame_yuv).data[3] = std::ptr::null_mut();
-            (*self.frame_yuv).linesize[0] = width_c;
-            (*self.frame_yuv).linesize[1] = width_c / 2;
-            (*self.frame_yuv).linesize[2] = width_c / 2;
-            (*self.frame_yuv).linesize[3] = 0;
-            (*self.frame_yuv).width = width_c;
-            (*self.frame_yuv).height = height_c;
-            (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
-
-            self.next_pts += 1;
-            (*self.frame_yuv).pts = self.next_pts;
-            let send_rc = av::avcodec_send_frame(self.ctx, self.frame_yuv);
-            if send_rc < 0 && !is_eagain(send_rc) {
-                return Err(format!("avcodec_send_frame: {}", av_err(send_rc)));
-            }
-            self.drain_packets(max_drain)?;
-        }
-
         Ok(())
     }
 
@@ -430,17 +336,15 @@ impl NativeVideoEncoder {
             (*self.frame_yuv).width = self.width as c_int;
             (*self.frame_yuv).height = self.height as c_int;
             (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
+            if self.force_keyframe_next {
+                (*self.ctx).gop_size = 1;
+                (*self.frame_yuv).key_frame = 1;
+                (*self.frame_yuv).pict_type = av::AVPictureType_AV_PICTURE_TYPE_I;
+            }
 
-            // Send this input frame EXACTLY once per `encode` call. The
-            // encoder's internal delay was absorbed at `new()` time via
-            // `prime_with_discards`, so by the time the caller reaches
-            // here the pipeline already has packets in `pending` (when
-            // priming produced output) and is no longer buffering.
-            //
-            // Bounded drain after send; if the encoder is still
-            // buffering this single frame, return an error rather than
-            // resending — the caller can choose to drop the frame, since
-            // duplicating input data violates the per-call contract.
+            // Send each captured input exactly once. VideoToolbox can buffer
+            // the first few inputs while its session starts; later capture
+            // iterations drain that delay without duplicating frames.
             const MAX_DRAIN: i32 = 64;
             self.next_pts += 1;
             (*self.frame_yuv).pts = self.next_pts;
@@ -450,12 +354,12 @@ impl NativeVideoEncoder {
             }
             self.drain_packets(MAX_DRAIN)?;
 
-            match self.pending.pop_front() {
-                Some(frame) => Ok(frame),
-                // Encoder is still buffering this single frame. The
-                // caller is responsible for deciding whether to drop it
-                // or retry externally — we never resend the input.
-                None => Err("encoder buffering".into()),
+            if let Some(frame) = self.pending.pop_front() {
+                self.force_keyframe_next = false;
+                (*self.ctx).gop_size = self.fps.max(1) as c_int * 2;
+                Ok(frame)
+            } else {
+                Err("encoder buffering".into())
             }
         }
     }
@@ -509,7 +413,6 @@ fn extract_sps_pps(ctx: *mut av::AVCodecContext) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// Build a non-trivial RGBA frame so the encoder has real motion/
     /// texture to compress. All-zeros is the most compressible possible
     /// H.264 input, which produces degenerate sub-100-byte P-frames.
     /// `salt` rotates the test pattern so successive encode passes
@@ -551,8 +454,18 @@ mod tests {
     #[test]
     fn smoke_encode() {
         let mut enc = NativeVideoEncoder::new(320, 240, 30, 500).expect("encoder");
-        let rgba1 = varied_rgba(320, 240, 0);
-        let frame = enc.encode(&rgba1).expect("encode first");
+        let mut first = None;
+        for salt in 0..16u8 {
+            match enc.encode(&varied_rgba(320, 240, salt)) {
+                Ok(frame) => {
+                    first = Some(frame);
+                    break;
+                }
+                Err(error) if error == "encoder buffering" => {}
+                Err(error) => panic!("encode first: {error}"),
+            }
+        }
+        let frame = first.expect("encoder did not produce a first frame");
         eprintln!(
             "smoke_encode: first frame {} bytes, keyframe={}",
             frame.data.len(),
@@ -566,7 +479,13 @@ mod tests {
         // encoder).
         let rgba2 = varied_rgba(320, 240, 17);
         let start = std::time::Instant::now();
-        let frame = enc.encode(&rgba2).expect("encode second");
+        let frame = loop {
+            match enc.encode(&rgba2) {
+                Ok(frame) => break frame,
+                Err(error) if error == "encoder buffering" => continue,
+                Err(error) => panic!("encode second: {error}"),
+            }
+        };
         let elapsed = start.elapsed();
         eprintln!(
             "smoke_encode: second frame timing = {:?} ({} bytes, keyframe={}, first 16 bytes {:02x?})",

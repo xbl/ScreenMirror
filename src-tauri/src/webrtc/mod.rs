@@ -91,16 +91,33 @@ fn normalize_encoder_dimensions(width: u32, height: u32) -> (u32, u32) {
     (width & !1, height & !1)
 }
 
+fn resize_rgba_nearest(rgba: &RgbaImage, width: u32, height: u32) -> RgbaImage {
+    let src_width = rgba.width();
+    let src_height = rgba.height();
+    let src = rgba.as_raw();
+    let mut dst = vec![0u8; (width as usize) * (height as usize) * 4];
+    for y in 0..height {
+        let sy = ((y as u64) * (src_height as u64) / (height as u64)) as u32;
+        for x in 0..width {
+            let sx = ((x as u64) * (src_width as u64) / (width as u64)) as u32;
+            let src_offset = ((sy * src_width + sx) * 4) as usize;
+            let dst_offset = ((y * width + x) * 4) as usize;
+            dst[dst_offset..dst_offset + 4].copy_from_slice(&src[src_offset..src_offset + 4]);
+        }
+    }
+    RgbaImage::from_raw(width, height, dst).expect("nearest resize dimensions match buffer")
+}
+
 fn normalize_captured_rgba(rgba: RgbaImage) -> RgbaImage {
     let max_dim: u32 = std::env::var("SCREENMIRROR_MAX_DIM")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(640);
+        .unwrap_or(960);
     let rgba = if rgba.width() > max_dim || rgba.height() > max_dim {
         let scale = max_dim as f32 / rgba.width().max(rgba.height()) as f32;
         let nw = ((rgba.width() as f32) * scale).round().max(1.0) as u32;
         let nh = ((rgba.height() as f32) * scale).round().max(1.0) as u32;
-        image::imageops::resize(&rgba, nw, nh, image::imageops::FilterType::Nearest)
+        resize_rgba_nearest(&rgba, nw, nh)
     } else {
         rgba
     };

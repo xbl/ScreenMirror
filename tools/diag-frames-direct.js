@@ -83,7 +83,7 @@ async function main() {
       SCREENMIRROR_TEST_ROOM: ROOM_ID,
       SCREENMIRROR_CAPTURE: process.env.SCREENMIRROR_CAPTURE ?? 'test',
       SCREENMIRROR_E2E_AUTO_APPROVE: '1',
-      SCREENMIRROR_MAX_DIM: '480',
+      SCREENMIRROR_MAX_DIM: process.env.SCREENMIRROR_MAX_DIM ?? '960',
       SCREENMIRROR_CAPTURE_QUALITY: '0.3',
       VIEWER_DIST,
     },
@@ -159,6 +159,8 @@ async function main() {
     console.log(`[diag] navigating to ${BASE}/${ROOM_ID}`);
     await page.goto(`${BASE}/${ROOM_ID}`, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log(`[diag] page loaded at +${Date.now() - t0}ms`);
+    spawnSync('osascript', ['-e', 'tell application "System Events" to tell process "Clock" to set frontmost to true']);
+    await new Promise((resolve) => setTimeout(resolve, 500));
     let baseline = null;
     const baselineDeadline = Date.now() + 8000;
     while (!baseline && Date.now() < baselineDeadline) {
@@ -179,8 +181,7 @@ async function main() {
     }
     console.log(`[diag] baseline signature=${baseline?.signature ?? 'unavailable'} at +${Date.now() - t0}ms`);
     const changeTriggeredAt = Date.now() - t0;
-    const calculator = spawnSync('open', ['-a', 'Calculator'], { encoding: 'utf8' });
-    console.log(`[diag] desktop change triggered at +${changeTriggeredAt}ms (open Calculator status=${calculator.status})`);
+    console.log(`[diag] waiting for live Clock stopwatch change at +${changeTriggeredAt}ms`);
 
     // Poll every 200ms for 15s — capture state evolution
     const trace = [];
@@ -258,9 +259,25 @@ async function main() {
         ev.push(`pixR=${snap.pixelStats.maxR}G=${snap.pixelStats.maxG}B=${snap.pixelStats.maxB}n=${snap.pixelStats.nonBlack}`);
         if (!pixelSample) pixelSample = { tMs: Date.now() - t0, ...snap.pixelStats };
       }
-      if (snap.pixelStats && baseline && !firstChangedAt && snap.pixelStats.signature !== baseline.signature) {
+      if (snap.pixelStats && baseline && !firstChangedAt && snap.pixelStats.nonBlack > 1000 && snap.pixelStats.signature !== baseline.signature) {
         firstChangedAt = Date.now() - t0;
-        console.log(`[diag] first changed decoded frame at +${firstChangedAt}ms; latency=${firstChangedAt - changeTriggeredAt}ms`);
+        const hostShot = '/tmp/clock-stopwatch-host-at-viewer-change.png';
+        spawnSync('screencapture', ['-x', hostShot]);
+        await page.screenshot({ path: path.join(OUT_DIR, 'viewer-clock-at-change.png'), fullPage: true });
+        const canvasShot = await page.evaluate(() => {
+          const v = document.querySelector('video.frame');
+          if (!v || !v.videoWidth) return null;
+          const c = document.createElement('canvas');
+          c.width = v.videoWidth;
+          c.height = v.videoHeight;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          return c.toDataURL('image/png');
+        });
+        if (canvasShot) {
+          fs.writeFileSync(path.join(OUT_DIR, 'viewer-clock-decoded-frame.png'), Buffer.from(canvasShot.split(',')[1], 'base64'));
+        }
+        console.log(`[diag] first changed decoded frame at +${firstChangedAt}ms; latency=${firstChangedAt - changeTriggeredAt}ms; hostShot=${hostShot}; viewerShot=${path.join(OUT_DIR, 'viewer-clock-at-change.png')}; decodedFrame=${path.join(OUT_DIR, 'viewer-clock-decoded-frame.png')}`);
       }
       if (snap.statusPill) ev.push(`pill=${snap.statusPill}`);
       if (snap.hasDisconnected) ev.push(`disconnect("${snap.noFramesText}")`);
