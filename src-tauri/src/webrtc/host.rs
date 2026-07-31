@@ -74,7 +74,9 @@ pub struct HostPeer {
 
 impl HostPeer {
     pub fn new() -> Self {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<H264EncodedFrame>(3);
+        // A display stream is live state. Keep only one pending access unit so
+        // a slow encoder or viewer can never turn old frames into seconds of lag.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<H264EncodedFrame>(1);
         Self {
             rtc: Arc::new(Mutex::new(None)),
             socket: Arc::new(Mutex::new(None)),
@@ -250,6 +252,10 @@ impl HostPeer {
                 if let Some(mid) = video_mid {
                     if let Ok(frame) = frame_rx.lock().try_recv() {
                         if frame.data.is_empty() {
+                            continue;
+                        }
+                        if frame.captured_at.elapsed() > Duration::from_millis(150) {
+                            tracing::debug!("host: dropping stale encoded frame");
                             continue;
                         }
                         let now = Instant::now();

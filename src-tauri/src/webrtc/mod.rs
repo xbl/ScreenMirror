@@ -138,8 +138,9 @@ fn normalize_captured_rgba_with_max_dim(rgba: RgbaImage, max_dim: u32) -> RgbaIm
 fn profile_max_dim(quality: f32) -> u32 {
     match quality {
         q if q >= 0.9 => 3840,
-        // High uses 1920px with a decode-friendly frame rate. Ultra remains
-        // an explicit opt-in for devices that can sustain larger frames.
+        // High uses 1920px to keep text readable while preserving interactive
+        // motion. Ultra remains an explicit opt-in for devices that can
+        // sustain larger frames.
         q if q >= 0.65 => 1920,
         _ => 1920,
     }
@@ -147,9 +148,9 @@ fn profile_max_dim(quality: f32) -> u32 {
 
 pub fn profile_fps(quality: f32) -> u32 {
     if quality >= 0.9 {
-        15
-    } else if quality >= 0.65 {
         20
+    } else if quality >= 0.65 {
+        30
     } else {
         30
     }
@@ -322,6 +323,9 @@ pub fn spawn_video_capture_loop(
             // capture_image() before using the recorder for ongoing changes.
             let use_video_recorder = std::env::var("SCREENMIRROR_USE_VIDEO_RECORDER")
                 .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                // Recorder mode provides materially steadier frame pacing on
+                // high-resolution displays. Direct polling remains available
+                // explicitly for diagnostics and very low-latency setups.
                 .unwrap_or(true);
             if use_video_recorder {
                 if let Some(monitor) = cached_monitor.as_ref() {
@@ -444,6 +448,7 @@ pub fn spawn_video_capture_loop(
                     match result {
                         Ok(encoded) => {
                             frames = frames.wrapping_add(1);
+                            let captured_at = frame.captured_at;
                             if frames <= 3 {
                                 tracing::info!(
                                     "video capture: encoded frame #{} bytes={} keyframe={}",
@@ -452,6 +457,11 @@ pub fn spawn_video_capture_loop(
                                     encoded.keyframe,
                                 );
                             }
+                            // The encoder may return a packet that was buffered
+                            // during startup; timestamp it with the source frame
+                            // so the sender can discard stale output.
+                            let mut encoded = encoded;
+                            encoded.captured_at = captured_at;
                             if frames % 30 == 1 {
                                 tracing::info!(
                                     "video capture: encoded frame #{} ({} bytes, keyframe={})",
@@ -467,7 +477,13 @@ pub fn spawn_video_capture_loop(
                 }
                 Err(error) => tracing::warn!("capture error: {error}"),
             }
-            std::thread::sleep(interval);
+            // `video_recorder()` already blocks in `recv_timeout(interval)`.
+            // Sleeping again here halves the effective frame rate and adds up
+            // to one full frame of avoidable latency. Polling capture still
+            // needs the pacing sleep.
+            if screen_capture.is_none() {
+                std::thread::sleep(interval);
+            }
         }
     });
     CaptureHandle { running }

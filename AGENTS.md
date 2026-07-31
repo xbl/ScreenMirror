@@ -28,21 +28,21 @@ the normal deployment environment, not as a constrained WAN link.
   jitter, playback, or encoder queues to make motion look smoother.
 - Use the available LAN bandwidth for readable text and high-resolution screen
   content. Preserve at least 30 fps when the host can sustain it.
-- High uses 1920px at 20fps to balance readable text with browser decode load;
+- High uses 1920px at 15fps to balance readable text with browser decode load;
   Ultra is opt-in at 3840px/15fps for devices that can sustain it.
 - Quality controls belong on the host, where capture and H.264 settings are
   decided. Viewer controls must not pretend to change encoding unless they
   renegotiate the stream.
-- WebRTC receiver delay properties use seconds: `jitterBufferTarget = 0.05`
-  means 50 ms, while `0` requests no target buffering. Pair it with
-  `playoutDelayHint = 0` when supported; never use a millisecond integer such
-  as `50`.
+- `RTCRtpReceiver.jitterBufferTarget` is expressed in milliseconds; `0`
+  requests no target buffering. `playoutDelayHint` is expressed in seconds;
+  use `0` when supported. Keep both at zero for this LAN display.
 - Validate latency with a moving clock or timer on the host and viewer, not
   only with a successful WebRTC connection or a rendered test pattern.
 - On macOS, seed each stream with one direct `capture_image()` frame, then use
-  `video_recorder()` for ongoing changes. This avoids recorder startup starvation
-  while preserving higher throughput; set `SCREENMIRROR_USE_VIDEO_RECORDER=0`
-  to force direct polling for diagnostics.
+  `video_recorder()` for stable ongoing frame pacing. Set
+  `SCREENMIRROR_USE_VIDEO_RECORDER=0` to force direct polling for diagnostics;
+  it can reduce latency on some systems but may cause dropped frames at high
+  resolution.
 
 ## Sub-projects (work in both, treat as one product)
 

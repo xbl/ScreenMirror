@@ -11,6 +11,7 @@
 pub struct H264EncodedFrame {
     pub data: Vec<u8>,
     pub keyframe: bool,
+    pub captured_at: std::time::Instant,
 }
 
 pub fn split_annex_b_nalus(input: &[u8]) -> Vec<&[u8]> {

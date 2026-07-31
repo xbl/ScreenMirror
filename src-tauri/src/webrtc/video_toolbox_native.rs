@@ -260,7 +260,11 @@ impl NativeVideoEncoder {
                     out.extend_from_slice(&self.sps_pps);
                 }
                 out.extend_from_slice(pkt_data);
-                self.pending.push_back(H264EncodedFrame { data: out, keyframe: is_key });
+                self.pending.push_back(H264EncodedFrame {
+                    data: out,
+                    keyframe: is_key,
+                    captured_at: std::time::Instant::now(),
+                });
                 av::av_packet_unref(self.packet);
             } else if is_eagain(rc) {
                 return Ok(());

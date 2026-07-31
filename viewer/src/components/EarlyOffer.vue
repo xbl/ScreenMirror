@@ -36,9 +36,8 @@ async function startNegotiation() {
   (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
-    // Both receive-side delay knobs use seconds (not milliseconds). Keep this
-    // interactive LAN display close to real time; late packets should be
-    // dropped instead of adding seconds of lag.
+    // Keep both receive-side delay knobs at zero for this interactive LAN
+    // display; late packets should be dropped instead of adding stale frames.
     try {
       event.receiver.jitterBufferTarget = 0;
       const receiver = event.receiver as RTCRtpReceiver & { playoutDelayHint?: number };
