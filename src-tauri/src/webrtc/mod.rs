@@ -188,6 +188,45 @@ fn captured_frame_from_rgba(rgba: RgbaImage, quality: f32) -> CapturedFrame {
     }
 }
 
+/// Convert a ScreenCaptureKit BGRA readback into the RGBA format consumed by
+/// the existing encoder. The native IOSurface encoder can bypass this copy
+/// once it is available; until then this is the safe fallback path.
+fn captured_frame_from_screenkit(
+    frame: ScreenKitFrame,
+    quality: f32,
+) -> Result<CapturedFrame, String> {
+    let width = frame.width as usize;
+    let height = frame.height as usize;
+    let stride = frame.bytes_per_row as usize;
+    let bgra = frame
+        .bgra
+        .ok_or_else(|| "ScreenCaptureKit frame has no BGRA readback".to_string())?;
+    if width == 0 || height == 0 || stride < width.saturating_mul(4) {
+        return Err("ScreenCaptureKit frame has invalid dimensions".into());
+    }
+    if bgra.len() < stride.saturating_mul(height) {
+        return Err("ScreenCaptureKit frame buffer is shorter than its stride".into());
+    }
+    let mut rgba = vec![0u8; width.saturating_mul(height).saturating_mul(4)];
+    for y in 0..height {
+        let src_row = y * stride;
+        let dst_row = y * width * 4;
+        for x in 0..width {
+            let src = src_row + x * 4;
+            let dst = dst_row + x * 4;
+            rgba[dst] = bgra[src + 2];
+            rgba[dst + 1] = bgra[src + 1];
+            rgba[dst + 2] = bgra[src];
+            rgba[dst + 3] = bgra[src + 3];
+        }
+    }
+    let rgba = RgbaImage::from_raw(frame.width, frame.height, rgba)
+        .ok_or_else(|| "ScreenCaptureKit RGBA dimensions do not match buffer".to_string())?;
+    let mut captured = captured_frame_from_rgba(rgba, quality);
+    captured.captured_at = frame.captured_at;
+    Ok(captured)
+}
+
 pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
     capture_one_at(target, 0)
 }
@@ -368,6 +407,11 @@ pub fn spawn_video_capture_loop(
             None
         };
         #[cfg(target_os = "macos")]
+        let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen)
+            && std::env::var("SCREENMIRROR_USE_IOSURFACE")
+                .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+        #[cfg(target_os = "macos")]
         let mut screen_capture = {
             // On some macOS versions video_recorder() is change-driven and
             // does not emit an initial frame. The loop seeds one frame with
@@ -378,7 +422,7 @@ pub fn spawn_video_capture_loop(
                 // high-resolution displays. Direct polling remains available
                 // explicitly for diagnostics and very low-latency setups.
                 .unwrap_or(true);
-            if use_video_recorder {
+            if use_video_recorder && !use_screenkit_capture {
                 if let Some(monitor) = cached_monitor.as_ref() {
                     match monitor.video_recorder() {
                         Ok((recorder, receiver)) => match recorder.start() {
@@ -404,13 +448,47 @@ pub fn spawn_video_capture_loop(
                 None
             }
         };
+        #[cfg(target_os = "macos")]
+        let mut screenkit_capture = if use_screenkit_capture {
+            match start_screen_capture(target, fps) {
+                Ok(capture) => {
+                    tracing::info!(
+                        "using ScreenCaptureKit latest-frame capture (IOSurface encoder available={})",
+                        iosurface_encoder_available()
+                    );
+                    Some(capture)
+                }
+                Err(error) => {
+                    tracing::warn!("ScreenCaptureKit unavailable; falling back to xcap: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         #[cfg(not(target_os = "macos"))]
         let mut screen_capture: Option<()> = None;
+        #[cfg(not(target_os = "macos"))]
+        let mut screenkit_capture: Option<ScreenKitCapture> = None;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             let frame_index = frames;
             let capture_started = std::time::Instant::now();
-            let captured = if frames == 0 {
+            let captured = if let Some(capture) = screenkit_capture.as_ref() {
+                match capture.recv_timeout(interval) {
+                    Ok(frame) => captured_frame_from_screenkit(frame, target.quality),
+                    Err(ScreenKitError::Unavailable(_)) => continue,
+                    Err(ScreenKitError::Stopped) => {
+                        tracing::warn!("ScreenCaptureKit stopped; falling back to xcap");
+                        screenkit_capture = None;
+                        continue;
+                    }
+                    Err(ScreenKitError::UnsupportedPlatform) => {
+                        screenkit_capture = None;
+                        continue;
+                    }
+                }
+            } else if frames == 0 {
                 // Seed the encoder immediately. Some recorder implementations
                 // do not emit an initial frame until a display change occurs.
                 #[cfg(target_os = "macos")]
@@ -472,7 +550,7 @@ pub fn spawn_video_capture_loop(
             // Sleeping again here halves the effective frame rate and adds up
             // to one full frame of avoidable latency. Polling capture still
             // needs the pacing sleep.
-            if screen_capture.is_none() {
+            if screen_capture.is_none() && screenkit_capture.is_none() {
                 std::thread::sleep(interval);
             }
         }
