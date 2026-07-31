@@ -1,7 +1,15 @@
 <template>
   <div class="connection-prompts">
-    <h2>{{ text }}</h2>
-    <button @click="$emit('reinitiate')">{{ t('viewer.reinitiate') }}</button>
+    <div class="signal-mark" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </div>
+    <p class="eyebrow">SCREENMIRROR</p>
+    <h1>{{ text }}</h1>
+    <button v-if="props.step !== 1" type="button" @click="$emit('reinitiate')">
+      {{ t('viewer.reinitiate') }}
+    </button>
   </div>
 </template>
 
@@ -28,17 +36,65 @@ const text = computed(() => prompts[props.step] ?? t('viewer.unknown'));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 24px;
-  background: rgba(240, 248, 250, 1);
+  justify-content: center;
+  gap: 14px;
   min-height: 100vh;
+  box-sizing: border-box;
+  padding: 32px;
+  color: var(--text);
+  background: var(--bg);
+  text-align: center;
+}
+.signal-mark {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  height: 28px;
+  margin-bottom: 16px;
+}
+.signal-mark span {
+  width: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+.signal-mark span:nth-child(1) { height: 10px; animation-delay: -0.35s; }
+.signal-mark span:nth-child(2) { height: 18px; animation-delay: -0.15s; }
+.signal-mark span:nth-child(3) { height: 28px; }
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font: 600 var(--fs-12)/1.2 var(--font-mono);
+  letter-spacing: 0.22em;
+}
+h1 {
+  max-width: 360px;
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: var(--fs-28);
+  line-height: 1.2;
 }
 button {
-  background: #ffb84d;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 999px;
+  margin-top: 16px;
+  padding: 10px 18px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font: 500 var(--fs-14)/1.2 var(--font-body);
   cursor: pointer;
+  transition: background var(--motion) ease, color var(--motion) ease;
+}
+button:hover {
+  background: var(--accent);
+  color: #0a1413;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; transform: scaleY(0.72); }
+  50% { opacity: 1; transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signal-mark span { animation: none; }
 }
 </style>

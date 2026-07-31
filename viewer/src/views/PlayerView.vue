@@ -1,11 +1,5 @@
 <template>
   <div class="player-view">
-    <PlayerControlPanel
-      v-if="status === 'streaming'"
-      :playing="playing"
-      @play-pause="togglePlay"
-      @fullscreen="toggleFullscreen"
-    />
     <video
       v-if="status === 'streaming'"
       ref="videoEl"
@@ -13,6 +7,9 @@
       autoplay
       playsinline
       muted
+      controls
+      controlslist="nodownload noremoteplayback"
+      disablepictureinpicture
       @loadedmetadata="onLoadedMetadata"
       @error="onVideoError"
     />
@@ -47,23 +44,17 @@
       </div>
     </div>
 
-    <div v-if="status !== 'idle'" class="player-status" :data-state="status">
-      <span class="player-status-dot" />
-      <span>{{ statusText }}</span>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
-import PlayerControlPanel from '../components/PlayerControlPanel.vue';
 import { useViewerStatus } from '../lib/viewerStatus';
 
 const { t } = useI18n();
 const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
 
-const playing = ref(true);
 const videoEl = ref<HTMLVideoElement | null>(null);
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
@@ -73,31 +64,10 @@ const noFrames = ref(false);
 // start; the watchdog is for a genuinely stalled stream, not encoder startup.
 const FRAME_WATCHDOG_MS = 10_000;
 
-const statusText = computed(() => {
-  if (status.value === 'streaming') return t('player.streaming');
-  if (status.value === 'disconnected') return t('player.disconnected');
-  return t('player.connecting');
-});
-
 const emit = defineEmits<{
   (e: 'state', step: number): void;
   (e: 'error', message: string): void;
 }>();
-
-function togglePlay() {
-  playing.value = !playing.value;
-  if (!videoEl.value) return;
-  if (playing.value) void videoEl.value.play().catch((err) => {
-    console.error('[player-view] play() rejected:', err);
-  });
-  else videoEl.value.pause();
-}
-
-function toggleFullscreen() {
-  if (!videoEl.value) return;
-  if (document.fullscreenElement) void document.exitFullscreen();
-  else void videoEl.value.requestFullscreen();
-}
 
 function attachStream(stream: MediaStream) {
   const v = videoEl.value;
@@ -259,8 +229,10 @@ onBeforeUnmount(() => {
   position: relative;
   display: flex;
   flex-direction: column;
+  width: 100vw;
   height: 100vh;
-  background: black;
+  overflow: hidden;
+  background: #000;
 }
 
 .frame {
@@ -269,6 +241,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   object-fit: contain;
   background: black;
+  cursor: pointer;
 }
 
 .player-center {
@@ -333,60 +306,4 @@ onBeforeUnmount(() => {
   background: #a8efe4;
 }
 
-.player-status {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(14, 17, 22, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  pointer-events: none;
-}
-
-.player-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-  flex-shrink: 0;
-}
-
-.player-status[data-state='connecting'] .player-status-dot {
-  background: var(--muted);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.player-status[data-state='streaming'] .player-status-dot {
-  background: var(--accent);
-}
-
-.player-status[data-state='disconnected'] .player-status-dot {
-  background: #e27d60;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .player-status[data-state='connecting'] .player-status-dot {
-    animation: none;
-    opacity: 1;
-  }
-}
 </style>
