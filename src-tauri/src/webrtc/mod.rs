@@ -9,11 +9,16 @@ pub mod ffi;
 pub mod host;
 pub mod screencapturekit_capture;
 pub mod video_toolbox;
+pub mod video_toolbox_iosurface;
 pub mod video_toolbox_native;
 
 pub use host::HostPeer;
 pub use screencapturekit_capture::{start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame};
 pub use video_toolbox::{H264EncodedFrame, VideoEncoder};
+pub use video_toolbox_iosurface::{
+    is_available as iosurface_encoder_available, IOSurfaceEncoderError,
+    IOSurfaceVideoEncoder,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CaptureKind {

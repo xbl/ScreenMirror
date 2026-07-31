@@ -119,6 +119,10 @@ pub fn normalize_h264_extradata_to_annex_b(raw: &[u8]) -> Vec<u8> {
 }
 
 pub use crate::webrtc::video_toolbox_native::NativeVideoEncoder as VideoEncoder;
+pub use crate::webrtc::video_toolbox_iosurface::{
+    is_available as iosurface_encoder_available, IOSurfaceEncoderError,
+    IOSurfaceVideoEncoder,
+};
 
 #[cfg(test)]
 mod tests {
