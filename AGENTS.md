@@ -79,7 +79,8 @@ screenmirror/
 │   │   ├── lib/viewerStatus.ts         # status state machine
 │   │   └── i18n/                       # en.ts, zh-CN.ts
 │   └── vite.config.ts
-├── tools/                     # Headless E2E + diagnostics (puppeteer-core)
+├── tests/e2e/                 # Full end-to-end tests (Puppeteer/WebRTC)
+├── tools/                     # Headless diagnostics, screenshots, and assets
 │   ├── verify-fix.js          # Main "frames render?" gate
 │   └── output/                # Screenshots land here (gitignored)
 ├── tests/                     # vue/TS unit tests (vitest)

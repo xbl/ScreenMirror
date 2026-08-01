@@ -23,10 +23,10 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '../..');
 const SERVER_BIN = path.join(ROOT, 'src-tauri', 'target', 'debug', 'screenmirror-server');
 const VIEWER_DIST = path.join(ROOT, 'viewer', 'dist');
-const OUT_DIR = path.join(__dirname, 'output');
+const OUT_DIR = path.join(ROOT, 'tools', 'output');
 const TEST_ROOM = 'e2e-room';
 const FRAME_TARGET = 5; // capture N frames then stop
 const FRAME_TIMEOUT_MS = 30000;

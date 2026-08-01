@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "icons": "node tools/build-icon.mjs",
+    "icons:check": "node tools/build-icon.mjs --check",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint src tests vite.config.ts",
@@ -25,7 +27,9 @@
     "tauri:build:screenkit": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri build --features screenkit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "test:e2e:frames": "node tests/e2e/e2e-frames.js",
+    "test:e2e:webrtc": "node tests/e2e/smoke-webrtc.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

@@ -22,10 +22,10 @@ import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '../..');
 const TAURI_BIN = path.join(ROOT, 'src-tauri', 'target', 'debug', 'screenmirror');
 const VIEWER_DIST = path.join(ROOT, 'viewer', 'dist');
-const OUT_DIR = path.join(__dirname, 'output');
+const OUT_DIR = path.join(ROOT, 'tools', 'output');
 const ROOM_ID = 'e2e-modules';
 // PORT is read from /api/host-info after the binary starts; the env var
 // SCREENMIRROR_PORT below is just the initial guess for the spawn step.

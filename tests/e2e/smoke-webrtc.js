@@ -21,7 +21,7 @@ import WebSocket from 'ws';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '../..');
 const SERVER_BIN = path.join(ROOT, 'src-tauri', 'target', 'debug', 'screenmirror-server');
 const VIEWER_DIST = path.join(ROOT, 'viewer', 'dist');
 const PORT = Number(process.env.SCREENMIRROR_PORT ?? 3131);
