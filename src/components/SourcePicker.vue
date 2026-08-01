@@ -127,15 +127,20 @@ function captureTarget(source: CaptureSourceInfo, targetQuality = quality.value)
   };
 }
 
-async function ensurePermission() {
+function isCurrentCaptureOperation(operation?: number) {
+  return operation === undefined || operation === captureOperation;
+}
+
+async function ensurePermission(operation?: number) {
   try {
     const granted = await api.checkScreenRecordingPermission();
     if (granted) return true;
   } catch {
-    error.value = t('source.errorPermission');
+    if (isCurrentCaptureOperation(operation)) error.value = t('source.errorPermission');
     return false;
   }
 
+  if (!isCurrentCaptureOperation(operation)) return false;
   error.value = t('source.errorPermission');
   await permissionModal.value?.checkAndShow();
   return false;
@@ -144,7 +149,7 @@ async function ensurePermission() {
 async function selectSource(source: CaptureSourceInfo, nextQuality = quality.value) {
   const operation = ++captureOperation;
   error.value = '';
-  if (!(await ensurePermission())) return false;
+  if (!(await ensurePermission(operation))) return false;
   if (operation !== captureOperation) return false;
 
   try {

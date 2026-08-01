@@ -208,6 +208,24 @@ describe('SourcePicker', () => {
     expect(wrapper.find('[data-source-id="terminal-window"]').classes()).toContain('selected');
   });
 
+  it('does not show a stale permission error after a newer selection succeeds', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    const firstPermission = deferred<boolean>();
+    apiMocks.checkScreenRecordingPermission
+      .mockImplementationOnce(() => firstPermission.promise)
+      .mockResolvedValueOnce(true);
+
+    await wrapper.get('[data-source-id="desk-display"]').trigger('click');
+    await wrapper.get('[data-source-id="terminal-window"]').trigger('click');
+    await flushPromises();
+    firstPermission.resolve(false);
+    await flushPromises();
+
+    expect(wrapper.find('[data-source-id="terminal-window"]').classes()).toContain('selected');
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
   it('keeps the selected preview visible when a refresh returns no sources', async () => {
     const wrapper = mountPicker();
     await flushPromises();
