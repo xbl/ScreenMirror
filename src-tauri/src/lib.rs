@@ -57,6 +57,7 @@ pub fn run() {
         waiting_session_id: Arc::new(Mutex::new(None)),
         waiting_source_id: Arc::new(Mutex::new(None)),
         capture_target: capture_target.clone(),
+        capture_target_switch_lock: Arc::new(Mutex::new(())),
         host_peers: host_peers.clone(),
         viewer_sinks: viewer_sinks.clone(),
     };

@@ -4,6 +4,7 @@ use crate::signaling::devices::{ConnectedDevicesService, Device};
 use crate::signaling::handlers::HostPeerMap;
 use crate::signaling::room_id::RoomIDService;
 use crate::storage::Storage;
+use crate::webrtc::host::prepare_all;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
@@ -16,6 +17,8 @@ pub struct CommandState {
     pub waiting_session_id: Arc<Mutex<Option<String>>>,
     pub waiting_source_id: Arc<Mutex<Option<String>>>,
     pub capture_target: Arc<Mutex<Option<crate::webrtc::CaptureTarget>>>,
+    /// Serializes the prepare/commit transaction across every active peer.
+    pub capture_target_switch_lock: Arc<Mutex<()>>,
     pub host_peers: HostPeerMap,
     pub viewer_sinks:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
@@ -231,9 +234,14 @@ pub fn set_capture_target(
         quality: args.quality.unwrap_or(0.75),
     };
     let fps = crate::webrtc::profile_fps(target.quality);
+    let _transaction = state.capture_target_switch_lock.lock();
     let peers = state.host_peers.lock().values().cloned().collect::<Vec<_>>();
-    for peer in peers {
-        peer.switch_target(target.clone(), fps)?;
+    let prepared = prepare_all(peers, |peer| {
+        peer.prepare_target_switch(target.clone(), fps)
+            .map(|prepared| (peer, prepared))
+    })?;
+    for (peer, prepared_target) in prepared {
+        peer.commit_target_switch(prepared_target);
     }
     *state.capture_target.lock() = Some(target);
     Ok(())

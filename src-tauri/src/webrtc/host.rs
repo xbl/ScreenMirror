@@ -5,12 +5,18 @@
 //! writer. Signaling state remains owned by the existing HostPeer API.
 
 use std::net::UdpSocket;
-use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_target_switch, should_drop_encoded_frame, TargetSwitchPlan};
+    use super::{
+        advance_rtp_timestamp, plan_target_switch, prepare_all, queue_admission,
+        should_drop_encoded_frame, QueueAdmission, TargetSwitchPlan,
+    };
     use std::time::Duration;
 
     #[test]
@@ -57,6 +63,39 @@ mod tests {
 
         assert_eq!(error, "screen-b is unavailable");
     }
+
+    #[test]
+    fn batch_prepare_does_not_return_partial_candidates_when_a_peer_fails() {
+        let mut prepared = Vec::new();
+        let error = prepare_all(["peer-a", "peer-b", "peer-c"], |peer| {
+            prepared.push(peer);
+            if peer == "peer-b" {
+                Err("peer-b cannot start capture".to_string())
+            } else {
+                Ok(peer)
+            }
+        })
+        .expect_err("a failed peer must prevent a partial commit");
+
+        assert_eq!(error, "peer-b cannot start capture");
+        assert_eq!(prepared, ["peer-a", "peer-b"]);
+    }
+
+    #[test]
+    fn pending_keyframe_is_not_replaced_by_a_delta_frame() {
+        assert_eq!(queue_admission(true, false), QueueAdmission::KeepExisting);
+        assert_eq!(queue_admission(false, true), QueueAdmission::ReplaceExisting);
+    }
+
+    #[test]
+    fn timestamp_remains_monotonic_when_the_capture_profile_fps_changes() {
+        let after_30_fps = advance_rtp_timestamp(9_000, 30);
+        let after_20_fps = advance_rtp_timestamp(after_30_fps, 20);
+
+        assert_eq!(after_30_fps, 12_000);
+        assert_eq!(after_20_fps, 16_500);
+        assert!(after_20_fps > after_30_fps);
+    }
 }
 
 use parking_lot::Mutex;
@@ -98,9 +137,99 @@ where
     }
 }
 
+pub(crate) fn prepare_all<T, P, F>(
+    items: impl IntoIterator<Item = T>,
+    mut prepare: F,
+) -> Result<Vec<P>, String>
+where
+    F: FnMut(T) -> Result<P, String>,
+{
+    items.into_iter().map(&mut prepare).collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum QueueAdmission {
+    KeepExisting,
+    ReplaceExisting,
+}
+
+fn queue_admission(existing_is_keyframe: bool, incoming_is_keyframe: bool) -> QueueAdmission {
+    match (existing_is_keyframe, incoming_is_keyframe) {
+        (true, false) => QueueAdmission::KeepExisting,
+        (false, true) => QueueAdmission::ReplaceExisting,
+        _ => QueueAdmission::KeepExisting,
+    }
+}
+
+fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
+    timestamp.wrapping_add(90_000 / i64::from(fps.max(1)))
+}
+
 struct QueuedEncodedFrame {
     generation: u64,
     frame: H264EncodedFrame,
+}
+
+fn enqueue_queued_frame(
+    frame_tx: &std::sync::mpsc::SyncSender<QueuedEncodedFrame>,
+    frame_rx: &Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+    queued: QueuedEncodedFrame,
+) -> bool {
+    match frame_tx.try_send(queued) {
+        Ok(()) => true,
+        Err(std::sync::mpsc::TrySendError::Full(incoming)) if !incoming.frame.keyframe => false,
+        Err(std::sync::mpsc::TrySendError::Full(incoming)) => {
+            let Ok(existing) = frame_rx.lock().try_recv() else {
+                return frame_tx.try_send(incoming).is_ok();
+            };
+            match queue_admission(existing.frame.keyframe, true) {
+                QueueAdmission::ReplaceExisting => frame_tx.try_send(incoming).is_ok(),
+                QueueAdmission::KeepExisting => {
+                    let _ = frame_tx.try_send(existing);
+                    false
+                }
+            }
+        }
+        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+    }
+}
+
+struct CandidateCapture {
+    generation: u64,
+    handle: Option<crate::webrtc::CaptureHandle>,
+    first_keyframe: Arc<Mutex<Option<H264EncodedFrame>>>,
+    active: Arc<AtomicBool>,
+}
+
+impl CandidateCapture {
+    fn take_first_keyframe(&self) -> Option<H264EncodedFrame> {
+        self.first_keyframe.lock().take()
+    }
+
+    fn activate(&self) {
+        self.active.store(true, Ordering::SeqCst);
+    }
+
+    fn take_handle(&mut self) -> crate::webrtc::CaptureHandle {
+        self.handle.take().expect("prepared capture handle is present")
+    }
+}
+
+impl Drop for CandidateCapture {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.as_ref() {
+            handle.stop();
+        }
+    }
+}
+
+/// A prepared target holds a running-but-not-yet-active capture. Dropping it
+/// aborts the candidate and leaves the current capture untouched.
+pub struct PreparedTargetSwitch {
+    target: CaptureTarget,
+    fps: u32,
+    expected_generation: u64,
+    candidate: Option<CandidateCapture>,
 }
 
 /// Rewrite H.264 fmtp lines in an SDP so that `packetization-mode=<n>` is set
@@ -155,7 +284,7 @@ pub struct HostPeer {
     /// negotiated but capture has not started yet.
     pub active_target: Arc<Mutex<Option<CaptureTarget>>>,
     capture_generation: Arc<AtomicU64>,
-    awaiting_keyframe_generation: Arc<AtomicU64>,
+    rtp_timestamp_step: Arc<AtomicI64>,
     capture_switch_lock: Arc<Mutex<()>>,
     /// Kept for compatibility; no data channel is created or used.
     pub channel_id: Arc<Mutex<Option<str0m::channel::ChannelId>>>,
@@ -180,7 +309,7 @@ impl HostPeer {
             capture_handle: Arc::new(Mutex::new(None)),
             active_target: Arc::new(Mutex::new(None)),
             capture_generation: Arc::new(AtomicU64::new(0)),
-            awaiting_keyframe_generation: Arc::new(AtomicU64::new(0)),
+            rtp_timestamp_step: Arc::new(AtomicI64::new(3_000)),
             capture_switch_lock: Arc::new(Mutex::new(())),
             channel_id: Arc::new(Mutex::new(None)),
             video_mid: Arc::new(Mutex::new(None)),
@@ -251,7 +380,11 @@ impl HostPeer {
         *self.video_mid.lock() = None;
     }
 
-    pub fn switch_target(&self, target: CaptureTarget, fps: u32) -> Result<(), String> {
+    pub fn prepare_target_switch(
+        &self,
+        target: CaptureTarget,
+        fps: u32,
+    ) -> Result<PreparedTargetSwitch, String> {
         let _switch = self.capture_switch_lock.lock();
         let capture_running = self.capture_handle.lock().is_some();
         let current = self.active_target.lock().clone();
@@ -260,73 +393,137 @@ impl HostPeer {
         })?;
 
         match plan {
-            TargetSwitchPlan::UpdatePending { target } => {
-                *self.active_target.lock() = Some(target);
-            }
-            TargetSwitchPlan::RestartCapture { target, .. } => {
-                self.replace_capture(target, fps);
+            TargetSwitchPlan::UpdatePending { target }
+                if self.video_mid.lock().is_none() => Ok(PreparedTargetSwitch {
+                    target,
+                    fps,
+                    expected_generation: self.capture_generation.load(Ordering::SeqCst),
+                    candidate: None,
+                }),
+            TargetSwitchPlan::UpdatePending { target }
+            | TargetSwitchPlan::RestartCapture { target, .. } => {
+                let expected_generation = self.capture_generation.load(Ordering::SeqCst);
+                let candidate = self.start_candidate_capture(target.clone(), fps, expected_generation + 1)?;
+                Ok(PreparedTargetSwitch {
+                    target,
+                    fps,
+                    expected_generation,
+                    candidate: Some(candidate),
+                })
             }
         }
+    }
+
+    pub fn commit_target_switch(&self, mut prepared: PreparedTargetSwitch) {
+        let _switch = self.capture_switch_lock.lock();
+        let Some(mut candidate) = prepared.candidate.take() else {
+            *self.active_target.lock() = Some(prepared.target);
+            self.rtp_timestamp_step
+                .store(90_000 / i64::from(prepared.fps.max(1)), Ordering::SeqCst);
+            return;
+        };
+
+        if self.capture_generation.load(Ordering::SeqCst) != prepared.expected_generation {
+            tracing::warn!("host: prepared capture superseded before commit; retaining current target");
+            return;
+        }
+        let Some(first_keyframe) = candidate.take_first_keyframe() else {
+            tracing::warn!("host: prepared capture lost its startup keyframe; retaining current target");
+            return;
+        };
+
+        // No fallible work remains after this point: the candidate already
+        // captured and encoded an IDR, while the current capture is still live.
+        let old_handle = self.capture_handle.lock().take();
+        self.clear_queued_frames();
+        self.capture_generation
+            .store(candidate.generation, Ordering::SeqCst);
+        if !self.enqueue_frame(QueuedEncodedFrame {
+            generation: candidate.generation,
+            frame: first_keyframe,
+        }) {
+            self.capture_generation
+                .store(prepared.expected_generation, Ordering::SeqCst);
+            *self.capture_handle.lock() = old_handle;
+            tracing::error!("host: could not queue prepared keyframe; retaining current target");
+            return;
+        }
+        candidate.activate();
+        *self.capture_handle.lock() = Some(candidate.take_handle());
+        *self.active_target.lock() = Some(prepared.target);
+        self.rtp_timestamp_step
+            .store(90_000 / i64::from(prepared.fps.max(1)), Ordering::SeqCst);
+        if let Some(handle) = old_handle {
+            handle.stop();
+        }
+    }
+
+    pub fn switch_target(&self, target: CaptureTarget, fps: u32) -> Result<(), String> {
+        let prepared = self.prepare_target_switch(target, fps)?;
+        self.commit_target_switch(prepared);
         Ok(())
     }
 
-    fn start_capture_if_needed(&self, fps: u32) {
-        let _switch = self.capture_switch_lock.lock();
+    fn start_capture_if_needed(&self, fps: u32) -> Result<(), String> {
         if self.capture_handle.lock().is_some() {
-            return;
+            return Ok(());
         }
-        let Some(target) = self.active_target.lock().clone() else {
-            return;
-        };
-        self.replace_capture(target, fps);
+        let target = self
+            .active_target
+            .lock()
+            .clone()
+            .ok_or_else(|| "capture target missing".to_string())?;
+        self.switch_target(target, fps)
     }
 
-    fn replace_capture(&self, target: CaptureTarget, fps: u32) {
-        // Advance first so a late frame from the stopped encoder cannot cross
-        // the queue-clearing boundary into the unchanged RTP writer.
-        let generation = self.capture_generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.awaiting_keyframe_generation
-            .store(generation, Ordering::SeqCst);
-        if let Some(handle) = self.capture_handle.lock().take() {
-            handle.stop();
-        }
-        self.clear_queued_frames();
-        let sink = self.frame_sink(generation);
-        *self.capture_handle.lock() = Some(spawn_video_capture_loop(target.clone(), fps, sink));
-        *self.active_target.lock() = Some(target);
-    }
-
-    fn frame_sink(&self, generation: u64) -> VideoFrameSink {
+    fn start_candidate_capture(
+        &self,
+        target: CaptureTarget,
+        fps: u32,
+        generation: u64,
+    ) -> Result<CandidateCapture, String> {
         let frame_tx = self.frame_tx.clone();
         let frame_rx = self.frame_rx.clone();
         let capture_generation = self.capture_generation.clone();
-        let awaiting_keyframe_generation = self.awaiting_keyframe_generation.clone();
-        Arc::new(move |frame| {
-            if capture_generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            let requires_keyframe = awaiting_keyframe_generation.load(Ordering::SeqCst) == generation;
-            if requires_keyframe && !frame.keyframe {
-                return;
-            }
-            let queued = QueuedEncodedFrame { generation, frame };
-            let sent = match frame_tx.try_send(queued) {
-                Ok(()) => true,
-                Err(std::sync::mpsc::TrySendError::Full(queued)) => {
-                    let _ = frame_rx.lock().try_recv();
-                    frame_tx.try_send(queued).is_ok()
+        let first_keyframe = Arc::new(Mutex::new(None));
+        let first_keyframe_for_sink = first_keyframe.clone();
+        let active = Arc::new(AtomicBool::new(false));
+        let active_for_sink = active.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let sink: VideoFrameSink = Arc::new(move |frame| {
+            if active_for_sink.load(Ordering::SeqCst) {
+                if capture_generation.load(Ordering::SeqCst) == generation {
+                    let _ = enqueue_queued_frame(
+                        &frame_tx,
+                        &frame_rx,
+                        QueuedEncodedFrame { generation, frame },
+                    );
                 }
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
-            };
-            if sent && requires_keyframe {
-                let _ = awaiting_keyframe_generation.compare_exchange(
-                    generation,
-                    0,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                );
+                return;
             }
+            if frame.keyframe {
+                let mut first = first_keyframe_for_sink.lock();
+                if first.is_none() {
+                    *first = Some(frame);
+                    let _ = ready_tx.try_send(());
+                }
+            }
+        });
+        let handle = spawn_video_capture_loop(target, fps, sink);
+        if ready_rx.recv_timeout(Duration::from_secs(5)).is_err() {
+            handle.stop();
+            return Err("capture did not produce an encoded keyframe within 5 seconds".into());
+        }
+        Ok(CandidateCapture {
+            generation,
+            handle: Some(handle),
+            first_keyframe,
+            active,
         })
+    }
+
+    fn enqueue_frame(&self, queued: QueuedEncodedFrame) -> bool {
+        enqueue_queued_frame(&self.frame_tx, &self.frame_rx, queued)
     }
 
     fn clear_queued_frames(&self) {
@@ -346,12 +543,12 @@ impl HostPeer {
         let peer_for_loop = self.clone();
         let capture_switch_lock = self.capture_switch_lock.clone();
         let capture_generation = self.capture_generation.clone();
+        let rtp_timestamp_step = self.rtp_timestamp_step.clone();
 
         std::thread::spawn(move || {
             let mut buf = vec![0u8; 2000];
             let mut video_mid: Option<Mid> = None;
             let mut timestamp: i64 = 0;
-            let timestamp_step = 90_000 / i64::from(fps.max(1));
             'outer: loop {
                 // Drain every output (events / transmit packets / pending timeouts)
                 // before falling back to the network read. str0m::Rtc::poll_output
@@ -396,7 +593,9 @@ impl HostPeer {
                                 event.mid,
                                 event.direction
                             );
-                            peer_for_loop.start_capture_if_needed(fps);
+                            if let Err(error) = peer_for_loop.start_capture_if_needed(fps) {
+                                tracing::error!("host: initial capture did not start: {error}");
+                            }
                         }
                         Ok(Output::Event(Event::IceConnectionStateChange(
                             str0m::IceConnectionState::Disconnected,
@@ -456,7 +655,10 @@ impl HostPeer {
                                 ) {
                                     tracing::warn!("host: H.264 writer failed: {error}");
                                 }
-                                timestamp = timestamp.wrapping_add(timestamp_step);
+                                let current_fps = (90_000
+                                    / rtp_timestamp_step.load(Ordering::SeqCst).max(1))
+                                    as u32;
+                                timestamp = advance_rtp_timestamp(timestamp, current_fps);
                                 // Drive packetization and pacing for the sample we
                                 // just queued. str0m holds onto the sample in
                                 // `to_payload` until we feed it Input::Timeout.
