@@ -6,7 +6,7 @@
 
 use parking_lot::Mutex;
 use screenmirror_lib::signaling::devices::ConnectedDevicesService;
-use screenmirror_lib::signaling::handlers::build_router;
+use screenmirror_lib::signaling::handlers::{build_router, HostPeerMap};
 use screenmirror_lib::signaling::room_id::RoomIDService;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
     let capture_target = Arc::new(Mutex::new(None::<screenmirror_lib::webrtc::CaptureTarget>));
     let viewer_sinks =
         std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
+    let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let app = build_router(
         room_ids,
         devices,
@@ -71,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         capture_target.clone(),
         port.clone(),
         viewer_sinks,
+        host_peers,
     );
 
     let addr: std::net::SocketAddr = std::env::var("SCREENMIRROR_PORT")

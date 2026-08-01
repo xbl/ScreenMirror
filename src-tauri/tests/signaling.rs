@@ -2,6 +2,7 @@ use axum::http::StatusCode;
 use parking_lot::Mutex;
 use screenmirror_lib::signaling::devices::ConnectedDevicesService;
 use screenmirror_lib::signaling::handlers::{build_router, parse_message};
+use screenmirror_lib::signaling::handlers::HostPeerMap;
 use screenmirror_lib::signaling::room::Room;
 use screenmirror_lib::signaling::room_id::RoomIDService;
 use screenmirror_lib::webrtc::CaptureTarget;
@@ -46,6 +47,7 @@ async fn health_endpoint_returns_ok() {
         .join("dist");
     let port = Arc::new(Mutex::new(0u16));
     let sinks = Arc::new(Mutex::new(HashMap::new()));
+    let peers: HostPeerMap = Arc::new(Mutex::new(HashMap::new()));
     let app = build_router(
         room_ids,
         devices,
@@ -53,6 +55,7 @@ async fn health_endpoint_returns_ok() {
         Arc::new(Mutex::new(None)),
         port,
         sinks,
+        peers,
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

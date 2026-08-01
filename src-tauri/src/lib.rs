@@ -1,5 +1,5 @@
 use crate::commands::CommandState;
-use crate::signaling::handlers::build_router;
+use crate::signaling::handlers::{build_router, HostPeerMap};
 use crate::signaling::{devices::ConnectedDevicesService, room_id::RoomIDService};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -49,6 +49,7 @@ pub fn run() {
     let viewer_sinks: Arc<
         Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>,
     > = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let command_state = CommandState {
         room_ids: room_ids.clone(),
         devices: devices.clone(),
@@ -56,6 +57,7 @@ pub fn run() {
         waiting_session_id: Arc::new(Mutex::new(None)),
         waiting_source_id: Arc::new(Mutex::new(None)),
         capture_target: capture_target.clone(),
+        host_peers: host_peers.clone(),
         viewer_sinks: viewer_sinks.clone(),
     };
 
@@ -187,9 +189,10 @@ pub fn run() {
             let vp = viewer_path;
             let ct = capture_target.clone();
             let vs = viewer_sinks.clone();
+            let hp = host_peers.clone();
             let start_port = *pp.lock();
             tauri::async_runtime::spawn(async move {
-                let router = build_router(rr, dd, vp, ct, pp.clone(), vs);
+                let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp);
                 let addr = std::net::SocketAddr::from(([0, 0, 0, 0], start_port));
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => l,

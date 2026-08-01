@@ -38,6 +38,7 @@ pub fn parse_message(raw: &str) -> Result<WireMessage, serde_json::Error> {
 /// Map of room_id → sender to push messages to the connected viewer.
 pub type ViewerSinkMap =
     Arc<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<String>>>>;
+pub type HostPeerMap = Arc<Mutex<std::collections::HashMap<String, Arc<HostPeer>>>>;
 
 static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -47,7 +48,7 @@ pub struct AppState {
     pub devices: Arc<Mutex<ConnectedDevicesService>>,
     pub viewer_path: PathBuf,
     /// Active host peer per viewer connection. Multiple peers may share a room.
-    pub host_peers: Arc<Mutex<std::collections::HashMap<String, Arc<HostPeer>>>>,
+    pub host_peers: HostPeerMap,
     /// Per-connection viewer sink. When host creates an answer, push it here.
     pub viewer_sinks: ViewerSinkMap,
     /// Optional capture target selected by the host UI for this session.
@@ -64,12 +65,13 @@ pub fn build_router(
     capture_target: Arc<Mutex<Option<crate::webrtc::CaptureTarget>>>,
     port: Arc<Mutex<u16>>,
     viewer_sinks: ViewerSinkMap,
+    host_peers: HostPeerMap,
 ) -> Router {
     let state = AppState {
         room_ids,
         devices,
         viewer_path: viewer_path.clone(),
-        host_peers: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        host_peers,
         viewer_sinks,
         capture_target,
         port,

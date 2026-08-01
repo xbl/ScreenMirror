@@ -1,7 +1,7 @@
 use crate::network;
 use crate::permissions;
 use crate::signaling::devices::{ConnectedDevicesService, Device};
-use crate::signaling::handlers::ViewerSinkMap;
+use crate::signaling::handlers::HostPeerMap;
 use crate::signaling::room_id::RoomIDService;
 use crate::storage::Storage;
 use parking_lot::Mutex;
@@ -16,6 +16,7 @@ pub struct CommandState {
     pub waiting_session_id: Arc<Mutex<Option<String>>>,
     pub waiting_source_id: Arc<Mutex<Option<String>>>,
     pub capture_target: Arc<Mutex<Option<crate::webrtc::CaptureTarget>>>,
+    pub host_peers: HostPeerMap,
     pub viewer_sinks:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
 }
@@ -223,11 +224,17 @@ pub fn set_capture_target(
         "test" | "testpattern" => crate::webrtc::CaptureKind::TestPattern,
         _ => return Err(format!("unknown kind {}", args.kind)),
     };
-    *state.capture_target.lock() = Some(crate::webrtc::CaptureTarget {
+    let target = crate::webrtc::CaptureTarget {
         kind,
         id: args.id,
         source_id: args.source_id,
         quality: args.quality.unwrap_or(0.75),
-    });
+    };
+    let fps = crate::webrtc::profile_fps(target.quality);
+    let peers = state.host_peers.lock().values().cloned().collect::<Vec<_>>();
+    for peer in peers {
+        peer.switch_target(target.clone(), fps)?;
+    }
+    *state.capture_target.lock() = Some(target);
     Ok(())
 }
