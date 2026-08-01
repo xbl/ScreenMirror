@@ -3,6 +3,10 @@ export default {
     title: 'Screenmirror',
     reset: 'Reset',
   },
+  tray: {
+    title: 'Quick share',
+    close: 'Close quick share panel',
+  },
   hero: {
     headline: 'Share this screen.',
     subhead: 'Scan the code or send the link to any device on the same network.',

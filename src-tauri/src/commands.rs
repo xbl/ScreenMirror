@@ -228,6 +228,29 @@ pub struct CaptureTargetArgs {
     pub quality: Option<f32>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureTargetState {
+    pub kind: String,
+    pub id: u32,
+    pub source_id: Option<String>,
+    pub quality: f32,
+}
+
+#[tauri::command]
+pub fn get_capture_target(state: State<'_, CommandState>) -> Option<CaptureTargetState> {
+    state.capture_target.lock().as_ref().map(|target| CaptureTargetState {
+        kind: match target.kind {
+            crate::webrtc::CaptureKind::Screen => "screen",
+            crate::webrtc::CaptureKind::Window => "window",
+            crate::webrtc::CaptureKind::TestPattern => "test",
+        }.into(),
+        id: target.id,
+        source_id: target.source_id.clone(),
+        quality: target.quality,
+    })
+}
+
 fn validate_target_for_empty_peer_set<F>(
     target: &crate::webrtc::CaptureTarget,
     validate: F,

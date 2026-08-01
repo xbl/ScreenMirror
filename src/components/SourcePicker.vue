@@ -151,6 +151,12 @@ function qualityValue(value: Quality) {
   return { balanced: 0.5, high: 0.75, ultra: 1.0 }[value];
 }
 
+function qualityName(value: number): Quality {
+  if (value >= 0.9) return 'ultra';
+  if (value >= 0.65) return 'high';
+  return 'balanced';
+}
+
 function resolution(source: CaptureSourceInfo) {
   return t('source.resolution', { width: source.width, height: source.height });
 }
@@ -299,10 +305,29 @@ async function refreshSources(forceRefresh = false) {
       return;
     }
 
-    const defaultSource = available.find((source) => source.kind === 'screen' && source.isPrimary)
+    let restoredSource: CaptureSourceInfo | undefined;
+    try {
+      const currentTarget = await api.getCaptureTarget();
+      if (currentTarget) {
+        restoredSource = available.find((source) =>
+          source.kind === currentTarget.kind
+          && (currentTarget.sourceId
+            ? source.sourceId === currentTarget.sourceId
+            : source.id === `${currentTarget.kind}:${currentTarget.id}`),
+        );
+        if (restoredSource) {
+          selectedSource.value = restoredSource;
+          quality.value = qualityName(currentTarget.quality);
+        }
+      }
+    } catch {
+      // Older test harnesses and non-Tauri previews may not expose this IPC.
+    }
+    const defaultSource = restoredSource
+      ?? available.find((source) => source.kind === 'screen' && source.isPrimary)
       ?? available.find((source) => source.kind === 'screen')
       ?? available[0];
-    if (defaultSource) await selectSource(defaultSource);
+    if (defaultSource && !restoredSource) await selectSource(defaultSource);
   } catch {
     if (generation === refreshGeneration) error.value = t('source.errorEnumerate');
   } finally {

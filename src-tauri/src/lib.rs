@@ -5,6 +5,33 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{Manager, Runtime};
 
+fn toggle_tray_panel(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("tray-panel") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return;
+    }
+
+    let url = tauri::WebviewUrl::App("index.html?tray=1".into());
+    if let Err(error) = tauri::WebviewWindowBuilder::new(app, "tray-panel", url)
+        .title("Screenmirror")
+        .inner_size(430.0, 860.0)
+        .min_inner_size(380.0, 620.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(true)
+        .build()
+    {
+        tracing::warn!("failed to open tray panel: {error}");
+    }
+}
+
 pub mod commands;
 pub mod network;
 pub mod permissions;
@@ -122,6 +149,7 @@ pub fn run() {
             commands::set_device_connected_status,
             commands::enumerate_capture_sources,
             commands::get_capture_source_preview,
+            commands::get_capture_target,
             commands::set_capture_target,
         ])
         .setup(move |app| {
@@ -136,6 +164,14 @@ pub fn run() {
                         &tauri::menu::Menu::with_items(
                             app,
                             &[
+                                &tauri::menu::MenuItem::with_id(
+                                    app,
+                                    "panel",
+                                    "Quick share",
+                                    true,
+                                    None::<&str>,
+                                )
+                                .unwrap(),
                                 &tauri::menu::MenuItem::with_id(
                                     app,
                                     "show",
@@ -157,6 +193,7 @@ pub fn run() {
                         .unwrap(),
                     )
                     .on_menu_event(move |app, event| match event.id().as_ref() {
+                        "panel" => toggle_tray_panel(app),
                         "show" => {
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.show();
@@ -170,10 +207,7 @@ pub fn run() {
                         use tauri::tray::TrayIconEvent;
                         if let TrayIconEvent::Click { .. } = event {
                             let app = tray.app_handle();
-                            if let Some(w) = app.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
+                            toggle_tray_panel(&app);
                         }
                     })
                     .build(app)?;

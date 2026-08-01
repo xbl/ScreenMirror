@@ -3,6 +3,10 @@ export default {
     title: 'Screenmirror',
     reset: '重置',
   },
+  tray: {
+    title: '快速投屏',
+    close: '关闭快速投屏面板',
+  },
   hero: {
     headline: '分享你的屏幕',
     subhead: '扫描二维码或发送链接,同一网络上的任何设备都可以观看。',

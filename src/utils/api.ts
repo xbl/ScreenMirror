@@ -48,6 +48,7 @@ export const api = {
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
   getCaptureSourcePreview: (sourceId: string, forceRefresh: boolean) =>
     invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh }),
+  getCaptureTarget: () => invoke<CaptureTargetState | null>('get_capture_target'),
   setCaptureTarget: (args: CaptureTarget) =>
     invoke<void>('set_capture_target', { args }),
 };
@@ -61,4 +62,11 @@ export type CaptureSourceInfo = {
   preview: string | null;
   width: number;
   height: number;
+};
+
+export type CaptureTargetState = {
+  kind: CaptureSourceKind;
+  id: number;
+  sourceId: string | null;
+  quality: number;
 };
