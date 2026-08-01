@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn unavailable_platform_returns_a_recoverable_startup_error() {
-        let error = start_screen_capture(
+        let result = start_screen_capture(
             CaptureTarget {
                 kind: CaptureKind::Screen,
                 id: u32::MAX,
@@ -252,9 +252,8 @@ mod tests {
                 quality: 0.75,
             },
             15,
-        )
-        .expect_err("unsupported ScreenCaptureKit must not panic on invalid targets");
+        );
 
-        assert!(matches!(error, ScreenKitError::UnsupportedPlatform));
+        assert!(matches!(result, Err(ScreenKitError::UnsupportedPlatform)));
     }
 }
