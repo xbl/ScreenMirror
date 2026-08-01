@@ -14,20 +14,16 @@ fn position_tray_panel(
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-fn toggle_tray_panel(
+fn show_tray_panel(
     app: &tauri::AppHandle,
     anchor: Option<tauri::PhysicalPosition<f64>>,
 ) {
     if let Some(window) = app.get_webview_window("tray-panel") {
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
-        } else {
-            if let Some(anchor) = anchor {
-                position_tray_panel(&window, anchor);
-            }
-            let _ = window.show();
-            let _ = window.set_focus();
+        if let Some(anchor) = anchor {
+            position_tray_panel(&window, anchor);
         }
+        let _ = window.show();
+        let _ = window.set_focus();
         return;
     }
 
@@ -193,7 +189,7 @@ pub fn run() {
                         } = event
                         {
                             let app = tray.app_handle();
-                            toggle_tray_panel(&app, Some(position));
+                            show_tray_panel(&app, Some(position));
                         }
                     })
                     .build(app)?;
