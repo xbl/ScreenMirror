@@ -2,7 +2,12 @@
   <section class="source-picker" aria-labelledby="source-picker-title">
     <header class="sp-head">
       <span id="source-picker-title" class="sp-eyebrow">{{ t('source.label') }}</span>
-      <button class="sp-refresh" type="button" :disabled="loading" @click="refreshSources(true)">
+      <button
+        class="sp-refresh"
+        type="button"
+        :disabled="loading || previewLoadingIds.size > 0"
+        @click="refreshSources(true)"
+      >
         {{ t('source.refresh') }}
       </button>
     </header>

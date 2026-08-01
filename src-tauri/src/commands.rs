@@ -208,11 +208,15 @@ pub fn enumerate_capture_sources() -> Result<Vec<crate::webrtc::CaptureSourceInf
 }
 
 #[tauri::command]
-pub fn get_capture_source_preview(
+pub async fn get_capture_source_preview(
     source_id: String,
     force_refresh: bool,
 ) -> Result<Option<String>, String> {
-    crate::webrtc::get_capture_source_preview(&source_id, force_refresh)
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::webrtc::get_capture_source_preview(&source_id, force_refresh)
+    })
+    .await
+    .map_err(|error| format!("capture source preview task failed: {error}"))?
 }
 
 #[derive(serde::Deserialize)]

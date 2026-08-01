@@ -93,11 +93,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function beginRefresh(wrapper: ReturnType<typeof mountPicker>) {
+function beginRefresh(wrapper: ReturnType<typeof mountPicker>, forceRefresh = false) {
   const { refreshSources } = (wrapper.vm.$ as unknown as {
-    setupState: { refreshSources: () => Promise<void> };
+    setupState: { refreshSources: (forceRefresh?: boolean) => Promise<void> };
   }).setupState;
-  return refreshSources();
+  return refreshSources(forceRefresh);
 }
 
 describe('SourcePicker', () => {
@@ -160,6 +160,7 @@ describe('SourcePicker', () => {
     });
     expect(wrapper.find('[data-testid="source-preview"] img').exists()).toBe(false);
     expect(wrapper.get('[data-testid="source-preview"]').text()).toContain('Loading preview...');
+    expect(wrapper.get('.sp-refresh').attributes('disabled')).toBeDefined();
 
     pendingPreview.resolve('data:image/jpeg;base64,main-display');
     await flushPromises();
@@ -167,6 +168,7 @@ describe('SourcePicker', () => {
     expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
       'data:image/jpeg;base64,main-display',
     );
+    expect(wrapper.get('.sp-refresh').attributes('disabled')).toBeUndefined();
   });
 
   it('keeps the null preview fallback when preview capture fails', async () => {
@@ -356,7 +358,7 @@ describe('SourcePicker', () => {
     const wrapper = mountPicker();
     await flushPromises();
 
-    await wrapper.get('.sp-refresh').trigger('click');
+    await beginRefresh(wrapper, true);
     await flushPromises();
     expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
       'data:image/jpeg;base64,newest',

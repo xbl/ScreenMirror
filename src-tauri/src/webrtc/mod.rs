@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
 use image::RgbaImage;
 #[cfg(any(target_os = "macos", test))]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -77,6 +77,7 @@ struct PreviewCacheKey {
 struct DisplayPreviewCache {
     previews: HashMap<PreviewCacheKey, String>,
     epochs: HashMap<PreviewCacheKey, u64>,
+    in_flight: HashSet<PreviewCacheKey>,
 }
 
 #[cfg(target_os = "macos")]
@@ -88,18 +89,25 @@ fn begin_preview_request(
     cache: &mut DisplayPreviewCache,
     key: &PreviewCacheKey,
     force_refresh: bool,
-) -> (u64, Option<String>) {
+) -> (u64, Option<String>, bool) {
+    let epoch = *cache.epochs.get(key).unwrap_or(&0);
+    if !force_refresh {
+        if let Some(preview) = cache.previews.get(key).cloned() {
+            return (epoch, Some(preview), false);
+        }
+    }
+    if !cache.in_flight.insert(key.clone()) {
+        return (epoch, None, false);
+    }
+
     if force_refresh {
         let epoch = cache.epochs.entry(key.clone()).or_insert(0);
         *epoch = epoch.wrapping_add(1);
         cache.previews.remove(key);
-        return (*epoch, None);
+        return (*epoch, None, true);
     }
 
-    (
-        *cache.epochs.get(key).unwrap_or(&0),
-        cache.previews.get(key).cloned(),
-    )
+    (epoch, None, true)
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -111,6 +119,19 @@ fn store_preview_if_current(
 ) {
     if cache.epochs.get(key).copied().unwrap_or(0) == epoch {
         cache.previews.insert(key.clone(), preview);
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn finish_preview_request(
+    cache: &mut DisplayPreviewCache,
+    key: &PreviewCacheKey,
+    epoch: u64,
+    preview: Option<String>,
+) {
+    cache.in_flight.remove(key);
+    if let Some(preview) = preview {
+        store_preview_if_current(cache, key, epoch, preview);
     }
 }
 
@@ -163,12 +184,15 @@ fn capture_monitor_preview(
         height,
     };
     let cache = DISPLAY_PREVIEW_CACHE.get_or_init(|| Mutex::new(DisplayPreviewCache::default()));
-    let (epoch, cached_preview) = match cache.lock() {
+    let (epoch, cached_preview, should_capture) = match cache.lock() {
         Ok(mut cache) => begin_preview_request(&mut cache, &key, force_refresh),
-        Err(_) => (0, None),
+        Err(_) => (0, None, false),
     };
     if let Some(preview) = cached_preview {
         return Some(preview);
+    }
+    if !should_capture {
+        return None;
     }
 
     let capture = monitor.capture_image().map_err(|error| error.to_string()).and_then(|image| {
@@ -180,10 +204,8 @@ fn capture_monitor_preview(
     }
     let preview = preview_from_capture_result(capture);
 
-    if let Some(preview) = preview.as_ref() {
-        if let Ok(mut cache) = cache.lock() {
-            store_preview_if_current(&mut cache, &key, epoch, preview.clone());
-        }
+    if let Ok(mut cache) = cache.lock() {
+        finish_preview_request(&mut cache, &key, epoch, preview.clone());
     }
     preview
 }
@@ -927,7 +949,7 @@ pub struct CaptureHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_preview_request, capture_bitrate_kbps, legacy_capture_source_id,
+        begin_preview_request, capture_bitrate_kbps, finish_preview_request, legacy_capture_source_id,
         normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions,
         next_screenkit_timeout_count, profile_max_dim, profile_fps, preview_dimensions,
         preview_from_capture_result, select_source_index, should_abandon_screenkit_after_timeouts,
@@ -1102,16 +1124,38 @@ mod tests {
         let mut cache = DisplayPreviewCache::default();
         cache.previews.insert(key.clone(), "old-preview".into());
 
-        let (old_epoch, cached) = begin_preview_request(&mut cache, &key, false);
+        let (old_epoch, cached, _) = begin_preview_request(&mut cache, &key, false);
         assert_eq!(cached.as_deref(), Some("old-preview"));
 
-        let (_, forced_cached) = begin_preview_request(&mut cache, &key, true);
+        let (forced_epoch, forced_cached, forced_started) =
+            begin_preview_request(&mut cache, &key, true);
         assert!(forced_cached.is_none());
+        assert!(forced_started);
         // Simulate an older capture completing after the forced one failed.
         store_preview_if_current(&mut cache, &key, old_epoch, "stale-preview".into());
+        finish_preview_request(&mut cache, &key, forced_epoch, None);
 
-        let (_, cached_after_failure) = begin_preview_request(&mut cache, &key, false);
+        let (_, cached_after_failure, should_capture_after_failure) =
+            begin_preview_request(&mut cache, &key, false);
         assert!(cached_after_failure.is_none());
+        assert!(should_capture_after_failure);
+    }
+
+    #[test]
+    fn preview_captures_are_single_flight_per_source() {
+        let key = PreviewCacheKey {
+            source_id: "display-1".into(),
+            width: 1920,
+            height: 1080,
+        };
+        let mut cache = DisplayPreviewCache::default();
+
+        let (_, _, started) = begin_preview_request(&mut cache, &key, false);
+        let (_, cached, force_started) = begin_preview_request(&mut cache, &key, true);
+
+        assert!(started);
+        assert!(cached.is_none());
+        assert!(!force_started);
     }
 }
 
