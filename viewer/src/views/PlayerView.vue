@@ -66,7 +66,6 @@ const FRAME_WATCHDOG_MS = 10_000;
 
 const emit = defineEmits<{
   (e: 'state', step: number): void;
-  (e: 'error', message: string): void;
 }>();
 
 function attachStream(stream: MediaStream) {
