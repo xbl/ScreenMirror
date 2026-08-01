@@ -375,7 +375,10 @@ fn select_source_by_id<T>(
 }
 
 pub struct CapturedFrame {
-    pub rgba: RgbaImage,
+    /// CPU RGBA is optional for ScreenCaptureKit frames. Native IOSurface
+    /// encoding consumes the original BGRA payload directly; only the
+    /// software fallback needs the converted image.
+    pub rgba: Option<RgbaImage>,
     pub captured_at: std::time::Instant,
     pub screenkit: Option<ScreenKitFrame>,
 }
@@ -469,7 +472,7 @@ fn capture_bitrate_kbps(width: u32, height: u32, fps: u32, quality: f32) -> u32 
 
 fn captured_frame_from_rgba(rgba: RgbaImage, quality: f32) -> CapturedFrame {
     CapturedFrame {
-        rgba: normalize_captured_rgba(rgba, quality),
+        rgba: Some(normalize_captured_rgba(rgba, quality)),
         captured_at: std::time::Instant::now(),
         screenkit: None,
     }
@@ -485,16 +488,28 @@ fn captured_frame_from_screenkit(
     let width = frame.width as usize;
     let height = frame.height as usize;
     let stride = frame.bytes_per_row as usize;
-    let native_frame = frame.clone();
-    let bgra = frame
-        .bgra
-        .ok_or_else(|| "ScreenCaptureKit frame has no BGRA readback".to_string())?;
     if width == 0 || height == 0 || stride < width.saturating_mul(4) {
         return Err("ScreenCaptureKit frame has invalid dimensions".into());
     }
-    if bgra.len() < stride.saturating_mul(height) {
+    if frame.bgra.as_ref().map_or(true, |bgra| bgra.len() < stride.saturating_mul(height)) {
         return Err("ScreenCaptureKit frame buffer is shorter than its stride".into());
     }
+    let _ = quality;
+    Ok(CapturedFrame {
+        rgba: None,
+        captured_at: frame.captured_at,
+        screenkit: Some(frame),
+    })
+}
+
+fn screenkit_frame_to_rgba(frame: &ScreenKitFrame, quality: f32) -> Result<RgbaImage, String> {
+    let width = frame.width as usize;
+    let height = frame.height as usize;
+    let stride = frame.bytes_per_row as usize;
+    let bgra = frame
+        .bgra
+        .as_ref()
+        .ok_or_else(|| "ScreenCaptureKit frame has no BGRA readback".to_string())?;
     let mut rgba = vec![0u8; width.saturating_mul(height).saturating_mul(4)];
     for y in 0..height {
         let src_row = y * stride;
@@ -510,10 +525,7 @@ fn captured_frame_from_screenkit(
     }
     let rgba = RgbaImage::from_raw(frame.width, frame.height, rgba)
         .ok_or_else(|| "ScreenCaptureKit RGBA dimensions do not match buffer".to_string())?;
-    let mut captured = captured_frame_from_rgba(rgba, quality);
-    captured.captured_at = frame.captured_at;
-    captured.screenkit = Some(native_frame);
-    Ok(captured)
+    Ok(normalize_captured_rgba(rgba, quality))
 }
 
 pub fn capture_one(target: &CaptureTarget) -> Result<CapturedFrame, String> {
@@ -667,7 +679,14 @@ pub fn spawn_video_capture_loop(
                     None => continue,
                 }
             };
-            let dimensions = (frame.rgba.width(), frame.rgba.height());
+            let dimensions = frame
+                .rgba
+                .as_ref()
+                .map(|rgba| (rgba.width(), rgba.height()))
+                .or_else(|| frame.screenkit.as_ref().map(|native| {
+                    normalize_encoder_dimensions(native.width, native.height)
+                }))
+                .unwrap_or((0, 0));
             let encode_started = std::time::Instant::now();
             let native_result = if let Some(native_frame) = frame.screenkit.take() {
                 if !iosurface_disabled {
@@ -687,15 +706,17 @@ pub fn spawn_video_capture_loop(
                             Ok(value) => iosurface_encoder = Some(value),
                             Err(error) => {
                                 tracing::warn!("native IOSurface encoder unavailable; falling back to FFmpeg: {error}");
+                                frame.rgba = screenkit_frame_to_rgba(&native_frame, target.quality).ok();
                                 iosurface_disabled = true;
                             }
                         }
                     }
                     if let Some(native_encoder) = iosurface_encoder.as_mut() {
-                        match native_encoder.encode(native_frame) {
+                        match native_encoder.encode(&native_frame) {
                             Ok(encoded) => Some(Ok(encoded)),
                             Err(error) => {
                                 tracing::warn!("native IOSurface encode failed; falling back to FFmpeg: {error}");
+                                frame.rgba = screenkit_frame_to_rgba(&native_frame, target.quality).ok();
                                 iosurface_encoder = None;
                                 iosurface_disabled = true;
                                 None
@@ -705,6 +726,7 @@ pub fn spawn_video_capture_loop(
                         None
                     }
                 } else {
+                    frame.rgba = screenkit_frame_to_rgba(&native_frame, target.quality).ok();
                     None
                 }
             } else {
@@ -713,6 +735,22 @@ pub fn spawn_video_capture_loop(
             let result = if let Some(result) = native_result {
                 result
             } else {
+                let rgba = match frame.rgba.take() {
+                    Some(rgba) => rgba,
+                    None => match frame.screenkit.as_ref() {
+                        Some(native) => match screenkit_frame_to_rgba(native, target.quality) {
+                            Ok(rgba) => rgba,
+                            Err(error) => {
+                                tracing::warn!("ScreenCaptureKit fallback conversion failed: {error}");
+                                continue;
+                            }
+                        },
+                        None => {
+                            tracing::warn!("captured frame has neither RGBA nor native pixels");
+                            continue;
+                        }
+                    },
+                };
                 if encoder.is_none() {
                 let kbps = capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
                 match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
@@ -723,7 +761,7 @@ pub fn spawn_video_capture_loop(
                     }
                 }
                 }
-                encoder.as_mut().unwrap().encode(frame.rgba.as_raw())
+                encoder.as_mut().unwrap().encode(rgba.as_raw())
             };
             let elapsed = encode_started.elapsed();
             if encoded_count < 3 || elapsed >= Duration::from_millis(100) {
