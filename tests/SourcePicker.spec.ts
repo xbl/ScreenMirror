@@ -91,12 +91,19 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function beginRefresh(wrapper: ReturnType<typeof mountPicker>) {
+  const { refreshSources } = (wrapper.vm.$ as unknown as {
+    setupState: { refreshSources: () => Promise<void> };
+  }).setupState;
+  return refreshSources();
+}
+
 describe('SourcePicker', () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     apiMocks.checkScreenRecordingPermission.mockResolvedValue(true);
     apiMocks.enumerateCaptureSources.mockResolvedValue(sources);
     apiMocks.setCaptureTarget.mockResolvedValue(undefined);
-    vi.clearAllMocks();
   });
 
   it('groups available sources and renders the selected display preview', async () => {
@@ -224,6 +231,48 @@ describe('SourcePicker', () => {
 
     expect(wrapper.find('[data-source-id="terminal-window"]').classes()).toContain('selected');
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it('does not show a stale refresh permission error after a newer refresh succeeds', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    const firstPermission = deferred<boolean>();
+    apiMocks.checkScreenRecordingPermission
+      .mockImplementationOnce(() => firstPermission.promise)
+      .mockResolvedValueOnce(true);
+
+    void beginRefresh(wrapper);
+    await flushPromises();
+    void beginRefresh(wrapper);
+    await flushPromises();
+    firstPermission.resolve(false);
+    await flushPromises();
+
+    expect(wrapper.find('[data-source-id="main-display"]').classes()).toContain('selected');
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it('keeps the newest refresh result when an older enumeration finishes later', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    const olderResult = deferred<typeof sources>();
+    const newerResult = deferred<typeof sources>();
+    apiMocks.enumerateCaptureSources
+      .mockImplementationOnce(() => olderResult.promise)
+      .mockImplementationOnce(() => newerResult.promise);
+
+    void beginRefresh(wrapper);
+    await flushPromises();
+    void beginRefresh(wrapper);
+    await flushPromises();
+    newerResult.resolve([{ ...sources[0], name: 'Newest display' }]);
+    await flushPromises();
+    olderResult.resolve([{ ...sources[0], name: 'Stale display' }]);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Newest display');
+    expect(wrapper.text()).not.toContain('Stale display');
+    expect(wrapper.get('.sp-refresh').attributes('disabled')).toBeUndefined();
   });
 
   it('keeps the selected preview visible when a refresh returns no sources', async () => {

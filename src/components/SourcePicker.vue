@@ -77,6 +77,7 @@ import { api, type CaptureSourceInfo, type CaptureTarget } from '../utils/api';
 import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
 
 type Quality = 'balanced' | 'high' | 'ultra';
+type Operation = { kind: 'capture' | 'refresh'; sequence: number };
 
 const { t } = useI18n();
 const sources = ref<CaptureSourceInfo[]>([]);
@@ -85,6 +86,8 @@ const quality = ref<Quality>('high');
 const error = ref('');
 const loading = ref(false);
 let captureOperation = 0;
+let refreshOperation = 0;
+let refreshGeneration = 0;
 
 const permissionModal = inject<ProvidedPermissionModal>(
   PermissionModalKey,
@@ -127,51 +130,60 @@ function captureTarget(source: CaptureSourceInfo, targetQuality = quality.value)
   };
 }
 
-function isCurrentCaptureOperation(operation?: number) {
-  return operation === undefined || operation === captureOperation;
+function isCurrentOperation(operation: Operation) {
+  return operation.kind === 'capture'
+    ? operation.sequence === captureOperation
+    : operation.sequence === refreshOperation;
 }
 
-async function ensurePermission(operation?: number) {
+async function ensurePermission(operation: Operation) {
   try {
     const granted = await api.checkScreenRecordingPermission();
     if (granted) return true;
   } catch {
-    if (isCurrentCaptureOperation(operation)) error.value = t('source.errorPermission');
+    if (isCurrentOperation(operation)) error.value = t('source.errorPermission');
     return false;
   }
 
-  if (!isCurrentCaptureOperation(operation)) return false;
+  if (!isCurrentOperation(operation)) return false;
   error.value = t('source.errorPermission');
   await permissionModal.value?.checkAndShow();
   return false;
 }
 
 async function selectSource(source: CaptureSourceInfo, nextQuality = quality.value) {
-  const operation = ++captureOperation;
+  const operation: Operation = { kind: 'capture', sequence: ++captureOperation };
   error.value = '';
   if (!(await ensurePermission(operation))) return false;
-  if (operation !== captureOperation) return false;
+  if (!isCurrentOperation(operation)) return false;
 
   try {
     await api.setCaptureTarget(captureTarget(source, nextQuality));
-    if (operation !== captureOperation) return false;
+    if (!isCurrentOperation(operation)) return false;
     selectedSource.value = source;
     quality.value = nextQuality;
     return true;
   } catch {
-    if (operation !== captureOperation) return false;
+    if (!isCurrentOperation(operation)) return false;
     error.value = t('source.errorSwitch');
     return false;
   }
 }
 
 async function refreshSources() {
+  const operation: Operation = { kind: 'refresh', sequence: ++refreshOperation };
+  const generation = ++refreshGeneration;
   error.value = '';
-  if (!(await ensurePermission())) return;
-
   loading.value = true;
+  if (!(await ensurePermission(operation))) {
+    if (generation === refreshGeneration) loading.value = false;
+    return;
+  }
+  if (!isCurrentOperation(operation) || generation !== refreshGeneration) return;
+
   try {
     const available = await api.enumerateCaptureSources();
+    if (generation !== refreshGeneration) return;
     sources.value = available;
 
     if (selectedSource.value) {
@@ -188,9 +200,9 @@ async function refreshSources() {
       ?? available[0];
     if (defaultSource) await selectSource(defaultSource);
   } catch {
-    error.value = t('source.errorEnumerate');
+    if (generation === refreshGeneration) error.value = t('source.errorEnumerate');
   } finally {
-    loading.value = false;
+    if (generation === refreshGeneration) loading.value = false;
   }
 }
 
