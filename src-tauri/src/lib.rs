@@ -75,13 +75,14 @@ pub fn run() {
                 _ => crate::webrtc::CaptureKind::Screen,
             },
             id: 0,
+            source_id: None,
             quality: std::env::var("SCREENMIRROR_CAPTURE_QUALITY")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.75),
         };
-        *capture_target.lock() = Some(target);
         tracing::info!("capture target set: {:?}", target);
+        *capture_target.lock() = Some(target);
     }
 
     tauri::Builder::default()

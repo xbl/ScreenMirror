@@ -37,12 +37,13 @@ export const api = {
   getPendingDevice: () => invoke<Device | null>('get_pending_device'),
   setDeviceConnectedStatus: () => invoke<void>('set_device_connected_status'),
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
-  setCaptureTarget: (args: { kind: string; id: number; quality?: number }) =>
+  setCaptureTarget: (args: { kind: string; id: number; sourceId?: string; quality?: number }) =>
     invoke<void>('set_capture_target', { args }),
 };
 
 export type CaptureSourceInfo = {
   id: string;
+  sourceId: string;
   name: string;
   kind: 'screen' | 'window';
   width: number;

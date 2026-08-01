@@ -45,10 +45,11 @@ async fn main() -> anyhow::Result<()> {
                 screenmirror_lib::webrtc::CaptureKind::Screen
             },
             id: 0,
+            source_id: None,
             quality: 0.75,
         };
-        *capture_target.lock() = Some(target);
         tracing::info!("capture target set: {:?}", target);
+        *capture_target.lock() = Some(target);
     }
 
     // For E2E: bind to LAN IP (not loopback) so both ends can agree.

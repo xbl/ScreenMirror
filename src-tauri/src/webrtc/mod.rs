@@ -30,17 +30,24 @@ pub enum CaptureKind {
     TestPattern,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CaptureTarget {
     pub kind: CaptureKind,
+    /// Legacy source index, retained so existing callers keep working.
     pub id: u32,
+    /// Stable native source identifier returned by `enumerate_sources`.
+    pub source_id: Option<String>,
     /// 0.25 .. 1.0. Kept for compatibility with existing callers.
     pub quality: f32,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureSourceInfo {
+    /// Legacy index-based identifier (for example, `screen:0`).
     pub id: String,
+    /// Stable native identifier (for example, `screen:69733440`).
+    pub source_id: String,
     pub name: String,
     pub kind: String,
     pub width: u32,
@@ -60,6 +67,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
         {
             out.push(CaptureSourceInfo {
                 id: format!("screen:{idx}"),
+                source_id: format!("screen:{}", m.id().unwrap_or(idx as u32)),
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
                 width: m.width().unwrap_or(0),
@@ -74,6 +82,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 }
                 out.push(CaptureSourceInfo {
                     id: format!("window:{idx}"),
+                    source_id: format!("window:{}", w.id().unwrap_or(idx as u32)),
                     name,
                     kind: "window".into(),
                     width: w.width().unwrap_or(0),
@@ -87,6 +96,26 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     {
         Ok(Vec::new())
     }
+}
+
+#[cfg(target_os = "macos")]
+fn select_source_by_id<T>(
+    sources: Vec<T>,
+    source_id: Option<&str>,
+    fallback_index: u32,
+    kind: &str,
+    id: impl Fn(&T) -> Result<u32, xcap::XCapError>,
+) -> Result<T, String> {
+    if let Some(source_id) = source_id {
+        return sources
+            .into_iter()
+            .find(|source| id(source).ok().is_some_and(|native_id| source_id == format!("{kind}:{native_id}")))
+            .ok_or_else(|| format!("{kind} source {source_id} is no longer available"));
+    }
+    sources
+        .into_iter()
+        .nth(fallback_index as usize)
+        .ok_or_else(|| format!("{kind} index {fallback_index} out of range"))
 }
 
 pub struct CapturedFrame {
@@ -258,20 +287,24 @@ fn capture_one_at_with_monitor(
         CaptureKind::Screen => {
             let monitor = match cached_monitor {
                 Some(monitor) => monitor.clone(),
-                None => Monitor::all()
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .nth(target.id as usize)
-                    .ok_or_else(|| format!("screen index {} out of range", target.id))?,
+                None => select_source_by_id(
+                    Monitor::all().map_err(|e| e.to_string())?,
+                    target.source_id.as_deref(),
+                    target.id,
+                    "screen",
+                    |monitor| monitor.id(),
+                )?,
             };
             monitor.capture_image()
         }
-        CaptureKind::Window => Window::all()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .nth(target.id as usize)
-            .ok_or_else(|| format!("window index {} out of range", target.id))?
-            .capture_image(),
+        CaptureKind::Window => select_source_by_id(
+            Window::all().map_err(|e| e.to_string())?,
+            target.source_id.as_deref(),
+            target.id,
+            "window",
+            |window| window.id(),
+        )?
+        .capture_image(),
         CaptureKind::TestPattern => Ok(render_test_pattern(target.id.wrapping_add(frame_index))),
     }
     .map_err(|e| e.to_string())?;
@@ -465,12 +498,13 @@ pub fn spawn_video_capture_loop(
         let cached_monitor = if matches!(target.kind, CaptureKind::Screen) {
             xcap::Monitor::all()
                 .map_err(|e| e.to_string())
-                .and_then(|monitors| {
-                    monitors
-                        .into_iter()
-                        .nth(target.id as usize)
-                        .ok_or_else(|| format!("screen index {} out of range", target.id))
-                })
+                .and_then(|monitors| select_source_by_id(
+                    monitors,
+                    target.source_id.as_deref(),
+                    target.id,
+                    "screen",
+                    |monitor| monitor.id(),
+                ))
                 .ok()
         } else {
             None
@@ -521,7 +555,7 @@ pub fn spawn_video_capture_loop(
         };
         #[cfg(target_os = "macos")]
         let mut screenkit_capture = if use_screenkit_capture {
-            match start_screen_capture(target, fps) {
+            match start_screen_capture(target.clone(), fps) {
                 Ok(capture) => {
                     tracing::info!(
                         "using ScreenCaptureKit latest-frame capture (IOSurface encoder available={})",

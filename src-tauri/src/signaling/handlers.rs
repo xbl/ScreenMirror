@@ -315,13 +315,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                                 .to_string(),
                                         );
                                     }
-                                    let target = (*state.capture_target.lock()).or_else(|| {
+                                    let target = state.capture_target.lock().clone().or_else(|| {
                                         tracing::warn!(
                                             "no capture target selected; defaulting to screen 0"
                                         );
                                         Some(crate::webrtc::CaptureTarget {
                                             kind: crate::webrtc::CaptureKind::Screen,
                                             id: 0,
+                                            source_id: None,
                                             quality: 0.75,
                                         })
                                     });

@@ -123,9 +123,16 @@ pub fn start_screen_capture(
     let content = SCShareableContent::get()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
     let displays = content.displays();
-    let display = displays
-        .get(target.id as usize)
-        .ok_or_else(|| ScreenKitError::Unavailable(format!("display index {} out of range", target.id)))?;
+    let display = if let Some(source_id) = target.source_id.as_deref() {
+        displays
+            .iter()
+            .find(|display| source_id == format!("screen:{}", display.display_id()))
+            .ok_or_else(|| ScreenKitError::Unavailable(format!("display source {source_id} is no longer available")))?
+    } else {
+        displays
+            .get(target.id as usize)
+            .ok_or_else(|| ScreenKitError::Unavailable(format!("display index {} out of range", target.id)))?
+    };
 
     let filter = SCContentFilter::create()
         .with_display(display)

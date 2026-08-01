@@ -251,7 +251,7 @@ impl HostPeer {
                                     target
                                 );
                                 *capture_handle_for_loop.lock() =
-                                    Some(spawn_video_capture_loop(target, fps, sink.clone()));
+                                    Some(spawn_video_capture_loop(target.clone(), fps, sink.clone()));
                                 capture_started = true;
                             }
                         }

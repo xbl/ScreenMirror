@@ -204,9 +204,11 @@ pub fn enumerate_capture_sources() -> Result<Vec<crate::webrtc::CaptureSourceInf
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureTargetArgs {
     pub kind: String,
     pub id: u32,
+    pub source_id: Option<String>,
     pub quality: Option<f32>,
 }
 
@@ -224,6 +226,7 @@ pub fn set_capture_target(
     *state.capture_target.lock() = Some(crate::webrtc::CaptureTarget {
         kind,
         id: args.id,
+        source_id: args.source_id,
         quality: args.quality.unwrap_or(0.75),
     });
     Ok(())
