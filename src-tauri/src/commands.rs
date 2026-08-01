@@ -228,6 +228,16 @@ pub struct CaptureTargetArgs {
     pub quality: Option<f32>,
 }
 
+fn validate_target_for_empty_peer_set<F>(
+    target: &crate::webrtc::CaptureTarget,
+    validate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&crate::webrtc::CaptureTarget) -> Result<(), String>,
+{
+    validate(target)
+}
+
 #[tauri::command]
 pub fn set_capture_target(
     state: State<'_, CommandState>,
@@ -248,6 +258,11 @@ pub fn set_capture_target(
     let fps = crate::webrtc::profile_fps(target.quality);
     let _transaction = state.capture_target_switch_lock.lock();
     let peers = state.host_peers.lock().values().cloned().collect::<Vec<_>>();
+    if peers.is_empty() {
+        validate_target_for_empty_peer_set(&target, |candidate| {
+            crate::webrtc::capture_one_at(candidate, 0).map(|_| ())
+        })?;
+    }
     let prepared = prepare_all(peers, |peer| {
         peer.prepare_target_switch(target.clone(), fps)
             .map(|prepared| (peer, prepared))
@@ -260,4 +275,27 @@ pub fn set_capture_target(
     }
     *state.capture_target.lock() = Some(target);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_target_for_empty_peer_set;
+    use crate::webrtc::{CaptureKind, CaptureTarget};
+
+    #[test]
+    fn invalid_target_is_rejected_before_empty_peer_state_can_publish_it() {
+        let target = CaptureTarget {
+            kind: CaptureKind::Screen,
+            id: 99,
+            source_id: Some("missing".into()),
+            quality: 0.75,
+        };
+
+        let error = validate_target_for_empty_peer_set(&target, |_| {
+            Err("screen source missing is unavailable".into())
+        })
+        .expect_err("invalid targets must not be accepted without peers");
+
+        assert_eq!(error, "screen source missing is unavailable");
+    }
 }
