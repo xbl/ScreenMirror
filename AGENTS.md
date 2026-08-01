@@ -2,8 +2,6 @@
 
 > Operational guide for AI agents and humans working inside this `screenmirror/`
 > subtree. This **is** a git repository (rooted at `screenmirror/`, branch:
-> `master`). The parent directory `/Users/blxie/workspace/every-screen/`
-> contains unrelated directories (e.g. `deskreen/`) that must be ignored.
 > All paths below are relative to `screenmirror/`.
 
 ## What this is
