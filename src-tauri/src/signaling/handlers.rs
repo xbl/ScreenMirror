@@ -53,6 +53,9 @@ pub struct AppState {
     pub viewer_sinks: ViewerSinkMap,
     /// Optional capture target selected by the host UI for this session.
     pub capture_target: Arc<Mutex<Option<crate::webrtc::CaptureTarget>>>,
+    /// Shared with the Tauri command so joining peers cannot miss a target
+    /// switch that is taking its active-peer snapshot.
+    pub capture_target_switch_lock: Arc<Mutex<()>>,
     /// Bound signaling port (after fallback). Used by `/api/host-info` so the
     /// host UI can build a complete QR URL from a single HTTP fetch.
     pub port: Arc<Mutex<u16>>,
@@ -66,6 +69,7 @@ pub fn build_router(
     port: Arc<Mutex<u16>>,
     viewer_sinks: ViewerSinkMap,
     host_peers: HostPeerMap,
+    capture_target_switch_lock: Arc<Mutex<()>>,
 ) -> Router {
     let state = AppState {
         room_ids,
@@ -74,6 +78,7 @@ pub fn build_router(
         host_peers,
         viewer_sinks,
         capture_target,
+        capture_target_switch_lock,
         port,
     };
     Router::new()
@@ -258,6 +263,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                         tracing::info!("OFFER received, room_id={}", room_id);
                         if let Some(sdp) = parsed.payload.get("sdp").and_then(|v| v.as_str()) {
                             let (answer_result, peer_opt) = {
+                                let _target_switch = state.capture_target_switch_lock.lock();
                                 let peer_entry = {
                                     let mut peers = state.host_peers.lock();
                                     peers
@@ -281,6 +287,25 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                                 .clone()
                                 };
                                 let res = peer_entry.accept_offer(sdp);
+                                if res.is_ok() {
+                                    let target = state.capture_target.lock().clone().or_else(|| {
+                                        tracing::warn!(
+                                            "no capture target selected; defaulting to screen 0"
+                                        );
+                                        Some(crate::webrtc::CaptureTarget {
+                                            kind: crate::webrtc::CaptureKind::Screen,
+                                            id: 0,
+                                            source_id: None,
+                                            quality: 0.75,
+                                        })
+                                    });
+                                    if let Some(target) = target {
+                                        let fps = crate::webrtc::profile_fps(target.quality);
+                                        if let Err(error) = peer_entry.clone().start_sharing(target, fps) {
+                                            tracing::error!("start_sharing: {error}");
+                                        }
+                                    }
+                                }
                                 (res, Some(peer_entry))
                             };
                             match answer_result {
@@ -317,23 +342,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                                 .to_string(),
                                         );
                                     }
-                                    let target = state.capture_target.lock().clone().or_else(|| {
-                                        tracing::warn!(
-                                            "no capture target selected; defaulting to screen 0"
-                                        );
-                                        Some(crate::webrtc::CaptureTarget {
-                                            kind: crate::webrtc::CaptureKind::Screen,
-                                            id: 0,
-                                            source_id: None,
-                                            quality: 0.75,
-                                        })
-                                    });
-                                    if let (Some(target), Some(peer)) = (target, peer_opt) {
-                                        let fps = crate::webrtc::profile_fps(target.quality);
-                                        if let Err(e) = peer.start_sharing(target, fps) {
-                                            tracing::error!("start_sharing: {e}");
-                                        }
-                                    }
+                                    let _ = peer_opt;
                                 }
                                 Err(e) => {
                                     tracing::warn!("accept_offer failed: {e}");

@@ -14,9 +14,10 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_rtp_timestamp, plan_target_switch, prepare_all, queue_admission,
+        advance_rtp_timestamp, capture_fps_for_target, plan_target_switch, prepare_all, queue_admission,
         should_drop_encoded_frame, QueueAdmission, TargetSwitchPlan,
     };
+    use crate::webrtc::{CaptureKind, CaptureTarget};
     use std::time::Duration;
 
     #[test]
@@ -96,6 +97,18 @@ mod tests {
         assert_eq!(after_20_fps, 16_500);
         assert!(after_20_fps > after_30_fps);
     }
+
+    #[test]
+    fn media_added_uses_the_current_active_target_profile() {
+        let active_target = CaptureTarget {
+            kind: CaptureKind::TestPattern,
+            id: 0,
+            source_id: None,
+            quality: 0.95,
+        };
+
+        assert_eq!(capture_fps_for_target(&active_target), 20);
+    }
 }
 
 use parking_lot::Mutex;
@@ -163,6 +176,10 @@ fn queue_admission(existing_is_keyframe: bool, incoming_is_keyframe: bool) -> Qu
 
 fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
     timestamp.wrapping_add(90_000 / i64::from(fps.max(1)))
+}
+
+fn capture_fps_for_target(target: &CaptureTarget) -> u32 {
+    crate::webrtc::profile_fps(target.quality)
 }
 
 struct QueuedEncodedFrame {
@@ -464,7 +481,7 @@ impl HostPeer {
         Ok(())
     }
 
-    fn start_capture_if_needed(&self, fps: u32) -> Result<(), String> {
+    fn start_capture_if_needed(&self) -> Result<(), String> {
         if self.capture_handle.lock().is_some() {
             return Ok(());
         }
@@ -473,7 +490,7 @@ impl HostPeer {
             .lock()
             .clone()
             .ok_or_else(|| "capture target missing".to_string())?;
-        self.switch_target(target, fps)
+        self.switch_target(target.clone(), capture_fps_for_target(&target))
     }
 
     fn start_candidate_capture(
@@ -593,7 +610,7 @@ impl HostPeer {
                                 event.mid,
                                 event.direction
                             );
-                            if let Err(error) = peer_for_loop.start_capture_if_needed(fps) {
+                            if let Err(error) = peer_for_loop.start_capture_if_needed() {
                                 tracing::error!("host: initial capture did not start: {error}");
                             }
                         }

@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
     let viewer_sinks =
         std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
     let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let capture_target_switch_lock = Arc::new(Mutex::new(()));
     let app = build_router(
         room_ids,
         devices,
@@ -73,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         port.clone(),
         viewer_sinks,
         host_peers,
+        capture_target_switch_lock,
     );
 
     let addr: std::net::SocketAddr = std::env::var("SCREENMIRROR_PORT")

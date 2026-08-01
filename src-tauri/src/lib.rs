@@ -50,6 +50,7 @@ pub fn run() {
         Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>,
     > = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let capture_target_switch_lock = Arc::new(Mutex::new(()));
     let command_state = CommandState {
         room_ids: room_ids.clone(),
         devices: devices.clone(),
@@ -57,7 +58,7 @@ pub fn run() {
         waiting_session_id: Arc::new(Mutex::new(None)),
         waiting_source_id: Arc::new(Mutex::new(None)),
         capture_target: capture_target.clone(),
-        capture_target_switch_lock: Arc::new(Mutex::new(())),
+        capture_target_switch_lock: capture_target_switch_lock.clone(),
         host_peers: host_peers.clone(),
         viewer_sinks: viewer_sinks.clone(),
     };
@@ -191,9 +192,10 @@ pub fn run() {
             let ct = capture_target.clone();
             let vs = viewer_sinks.clone();
             let hp = host_peers.clone();
+            let ctsl = capture_target_switch_lock.clone();
             let start_port = *pp.lock();
             tauri::async_runtime::spawn(async move {
-                let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp);
+                let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp, ctsl);
                 let addr = std::net::SocketAddr::from(([0, 0, 0, 0], start_port));
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => l,
