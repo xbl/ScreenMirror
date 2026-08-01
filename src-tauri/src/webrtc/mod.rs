@@ -1,6 +1,10 @@
 //! Screen capture -> H.264 -> RTP via str0m.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::codecs::jpeg::JpegEncoder;
 use image::RgbaImage;
+#[cfg(target_os = "macos")]
+use std::collections::HashMap;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -51,10 +55,96 @@ pub struct CaptureSourceInfo {
     pub name: String,
     pub kind: String,
     pub is_primary: bool,
-    /// Reserved for a future capture thumbnail data URL.
+    /// A compact JPEG thumbnail data URL when one could be captured.
     pub preview: Option<String>,
     pub width: u32,
     pub height: u32,
+}
+
+const PREVIEW_MAX_DIMENSION: u32 = 320;
+const PREVIEW_JPEG_QUALITY: u8 = 60;
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+struct PreviewCacheKey {
+    source_id: String,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(target_os = "macos")]
+static DISPLAY_PREVIEW_CACHE: std::sync::OnceLock<Mutex<HashMap<PreviewCacheKey, String>>> =
+    std::sync::OnceLock::new();
+
+fn preview_from_capture_result(capture: Result<RgbaImage, String>) -> Option<String> {
+    capture
+        .ok()
+        .and_then(|rgba| preview_data_url(rgba).ok())
+}
+
+fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
+    let longest_edge = width.max(height);
+    if longest_edge <= PREVIEW_MAX_DIMENSION {
+        return (width, height);
+    }
+
+    let scale = PREVIEW_MAX_DIMENSION as f64 / longest_edge as f64;
+    (
+        ((width as f64 * scale).round() as u32).max(1),
+        ((height as f64 * scale).round() as u32).max(1),
+    )
+}
+
+fn preview_data_url(rgba: RgbaImage) -> Result<String, String> {
+    let (width, height) = preview_dimensions(rgba.width(), rgba.height());
+    let thumbnail = image::imageops::resize(
+        &rgba,
+        width,
+        height,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut bytes = Vec::new();
+    JpegEncoder::new_with_quality(&mut bytes, PREVIEW_JPEG_QUALITY)
+        .encode_image(&thumbnail)
+        .map_err(|error| format!("failed to encode display preview: {error}"))?;
+
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
+}
+
+#[cfg(target_os = "macos")]
+fn capture_monitor_preview(
+    monitor: &xcap::Monitor,
+    source_id: &str,
+    width: u32,
+    height: u32,
+) -> Option<String> {
+    let key = PreviewCacheKey {
+        source_id: source_id.into(),
+        width,
+        height,
+    };
+    let cache = DISPLAY_PREVIEW_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(cache) = cache.lock() {
+        if let Some(preview) = cache.get(&key) {
+            return Some(preview.clone());
+        }
+    }
+
+    let capture = monitor.capture_image().map_err(|error| error.to_string()).and_then(|image| {
+        RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
+            .ok_or_else(|| "display preview has invalid image dimensions".into())
+    });
+    if capture.is_err() {
+        tracing::debug!(source_id, "could not capture display preview");
+    }
+    let preview = preview_from_capture_result(capture);
+
+    if let Some(preview) = preview.as_ref() {
+        if let Ok(mut cache) = cache.lock() {
+            cache.insert(key, preview.clone());
+        }
+    }
+    preview
 }
 
 fn legacy_capture_source_id(kind: &str, index: usize) -> String {
@@ -118,17 +208,20 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
             .into_iter()
             .enumerate()
         {
+            let source_id = m.id().map(|id| id.to_string()).map_err(|error| {
+                format!("failed to read display ID for screen {}: {error}", idx + 1)
+            })?;
+            let width = m.width().unwrap_or(0);
+            let height = m.height().unwrap_or(0);
             out.push(CaptureSourceInfo {
                 id: legacy_capture_source_id("screen", idx),
-                source_id: m.id().map(|id| id.to_string()).map_err(|error| {
-                    format!("failed to read display ID for screen {}: {error}", idx + 1)
-                })?,
+                preview: capture_monitor_preview(&m, &source_id, width, height),
+                source_id,
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
                 is_primary: m.is_primary().unwrap_or(false),
-                preview: None,
-                width: m.width().unwrap_or(0),
-                height: m.height().unwrap_or(0),
+                width,
+                height,
             });
         }
         if let Ok(windows) = Window::all() {
@@ -759,8 +852,10 @@ mod tests {
     use super::{
         capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
         normalize_encoder_dimensions, next_screenkit_timeout_count, profile_max_dim,
-        profile_fps, select_source_index, should_abandon_screenkit_after_timeouts,
+        profile_fps, preview_dimensions, preview_from_capture_result, select_source_index,
+        should_abandon_screenkit_after_timeouts,
     };
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use image::RgbaImage;
 
     #[test]
@@ -891,6 +986,32 @@ mod tests {
         assert!(!should_abandon_screenkit_after_timeouts(2));
         assert!(should_abandon_screenkit_after_timeouts(3));
         assert_eq!(next_screenkit_timeout_count(2, false), 0);
+    }
+
+    #[test]
+    fn preview_jpeg_is_bounded_to_320_pixels() {
+        let preview = preview_from_capture_result(Ok(RgbaImage::new(2560, 1600)))
+            .expect("a captured display produces a preview");
+        let encoded = preview
+            .strip_prefix("data:image/jpeg;base64,")
+            .expect("preview is a JPEG data URL");
+        let bytes = STANDARD.decode(encoded).expect("preview base64 decodes");
+        let image = image::load_from_memory(&bytes).expect("preview JPEG decodes");
+
+        assert!(image.width().max(image.height()) <= 320);
+        assert_eq!((image.width(), image.height()), (320, 200));
+    }
+
+    #[test]
+    fn preview_dimensions_leave_small_images_unchanged() {
+        assert_eq!(preview_dimensions(160, 90), (160, 90));
+    }
+
+    #[test]
+    fn failed_preview_capture_falls_back_to_none() {
+        let preview = preview_from_capture_result(Err("Screen Recording permission denied".into()));
+
+        assert!(preview.is_none());
     }
 }
 

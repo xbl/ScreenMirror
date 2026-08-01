@@ -288,6 +288,21 @@ describe('SourcePicker', () => {
     expect(wrapper.text()).toContain('No shareable sources are available.');
   });
 
+  it('replaces the selected display preview after a refresh', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([
+      { ...sources[0], preview: 'data:image/jpeg;base64,refreshed' },
+    ]);
+
+    await wrapper.get('.sp-refresh').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
+      'data:image/jpeg;base64,refreshed',
+    );
+  });
+
   it('labels null previews as unavailable instead of rendering a thumbnail', async () => {
     const wrapper = mountPicker();
     await flushPromises();

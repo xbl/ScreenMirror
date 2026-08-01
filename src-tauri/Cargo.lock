@@ -4095,6 +4095,7 @@ dependencies = [
  "anyhow",
  "apple-cf",
  "axum",
+ "base64 0.22.1",
  "bindgen 0.70.1",
  "chrono",
  "clap",
