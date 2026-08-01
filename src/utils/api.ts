@@ -10,6 +10,15 @@ export type Device = {
   sharingSessionId: string;
 };
 
+export type CaptureSourceKind = 'screen' | 'window';
+
+export type CaptureTarget = {
+  kind: CaptureSourceKind;
+  id: number;
+  sourceId: string;
+  quality: number;
+};
+
 export const api = {
   getLanIp: () => invoke<string | null>('get_lan_ip'),
   checkWifi: () => invoke<boolean>('check_wifi_connection'),
@@ -37,7 +46,7 @@ export const api = {
   getPendingDevice: () => invoke<Device | null>('get_pending_device'),
   setDeviceConnectedStatus: () => invoke<void>('set_device_connected_status'),
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
-  setCaptureTarget: (args: { kind: string; id: number; sourceId?: string; quality?: number }) =>
+  setCaptureTarget: (args: CaptureTarget) =>
     invoke<void>('set_capture_target', { args }),
 };
 
@@ -45,7 +54,7 @@ export type CaptureSourceInfo = {
   id: string;
   sourceId: string;
   name: string;
-  kind: 'screen' | 'window';
+  kind: CaptureSourceKind;
   isPrimary: boolean;
   preview: string | null;
   width: number;
