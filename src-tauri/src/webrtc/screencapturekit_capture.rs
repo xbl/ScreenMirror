@@ -123,20 +123,20 @@ pub fn start_screen_capture(
     let content = SCShareableContent::get()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
     let displays = content.displays();
-    let display = if let Some(source_id) = target
-        .source_id
-        .as_deref()
-        .filter(|source_id| super::is_native_source_id(source_id))
-    {
-        displays
-            .iter()
-            .find(|display| source_id == display.display_id().to_string())
-            .ok_or_else(|| ScreenKitError::Unavailable(format!("display source {source_id} is no longer available")))?
-    } else {
-        displays
-            .get(target.id as usize)
-            .ok_or_else(|| ScreenKitError::Unavailable(format!("display index {} out of range", target.id)))?
-    };
+    let display_ids = displays
+        .iter()
+        .map(|display| display.display_id().to_string())
+        .collect::<Vec<_>>();
+    let display_index = super::select_source_index(
+        &display_ids,
+        target.source_id.as_deref(),
+        target.id,
+        "display",
+    )
+    .map_err(ScreenKitError::Unavailable)?;
+    let display = displays.get(display_index).ok_or_else(|| {
+        ScreenKitError::Unavailable(format!("display index {} out of range", target.id))
+    })?;
 
     let filter = SCContentFilter::create()
         .with_display(display)
@@ -235,4 +235,26 @@ pub fn start_screen_capture(
     _fps: u32,
 ) -> Result<ScreenKitCapture, ScreenKitError> {
     Err(ScreenKitError::UnsupportedPlatform)
+}
+
+#[cfg(all(test, not(all(target_os = "macos", feature = "screenkit"))))]
+mod tests {
+    use super::{start_screen_capture, ScreenKitError};
+    use crate::webrtc::{CaptureKind, CaptureTarget};
+
+    #[test]
+    fn unavailable_platform_returns_a_recoverable_startup_error() {
+        let error = start_screen_capture(
+            CaptureTarget {
+                kind: CaptureKind::Screen,
+                id: u32::MAX,
+                source_id: Some("missing-display".into()),
+                quality: 0.75,
+            },
+            15,
+        )
+        .expect_err("unsupported ScreenCaptureKit must not panic on invalid targets");
+
+        assert!(matches!(error, ScreenKitError::UnsupportedPlatform));
+    }
 }

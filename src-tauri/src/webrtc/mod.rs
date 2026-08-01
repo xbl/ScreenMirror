@@ -67,6 +67,32 @@ fn is_native_source_id(source_id: &str) -> bool {
         && !source_id.starts_with("window:")
 }
 
+/// Resolve a source against the stable native identifiers emitted during
+/// enumeration. Only absent, empty, or legacy `screen:N` / `window:N` values
+/// may use the legacy index; a missing native identifier must not silently
+/// select a different display after a topology change.
+fn select_source_index(
+    source_ids: &[String],
+    source_id: Option<&str>,
+    fallback_index: u32,
+    kind: &str,
+) -> Result<usize, String> {
+    if let Some(source_id) = source_id.filter(|id| is_native_source_id(id)) {
+        return source_ids
+            .iter()
+            .position(|native_id| native_id == source_id)
+            .ok_or_else(|| format!("{kind} source {source_id} is no longer available"));
+    }
+
+    let index = usize::try_from(fallback_index)
+        .map_err(|_| format!("{kind} index {fallback_index} out of range"))?;
+    if index < source_ids.len() {
+        Ok(index)
+    } else {
+        Err(format!("{kind} index {fallback_index} out of range"))
+    }
+}
+
 const SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS: u8 = 3;
 
 fn should_abandon_screenkit_after_timeouts(consecutive_timeouts: u8) -> bool {
@@ -94,7 +120,9 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
         {
             out.push(CaptureSourceInfo {
                 id: legacy_capture_source_id("screen", idx),
-                source_id: m.id().map(|id| id.to_string()).unwrap_or_default(),
+                source_id: m.id().map(|id| id.to_string()).map_err(|error| {
+                    format!("failed to read display ID for screen {}: {error}", idx + 1)
+                })?,
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
                 is_primary: m.is_primary().unwrap_or(false),
@@ -111,7 +139,9 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 }
                 out.push(CaptureSourceInfo {
                     id: legacy_capture_source_id("window", idx),
-                    source_id: w.id().map(|id| id.to_string()).unwrap_or_default(),
+                    source_id: w.id().map(|id| id.to_string()).map_err(|error| {
+                        format!("failed to read native ID for window {idx}: {error}")
+                    })?,
                     name,
                     kind: "window".into(),
                     is_primary: false,
@@ -137,15 +167,18 @@ fn select_source_by_id<T>(
     kind: &str,
     id: impl Fn(&T) -> Result<u32, xcap::XCapError>,
 ) -> Result<T, String> {
-    if let Some(source_id) = source_id.filter(|id| is_native_source_id(id)) {
-        return sources
-            .into_iter()
-            .find(|source| id(source).ok().is_some_and(|native_id| source_id == native_id.to_string()))
-            .ok_or_else(|| format!("{kind} source {source_id} is no longer available"));
-    }
+    let source_ids = sources
+        .iter()
+        .map(|source| {
+            id(source)
+                .map(|native_id| native_id.to_string())
+                .map_err(|error| format!("failed to read native ID for {kind}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let index = select_source_index(&source_ids, source_id, fallback_index, kind)?;
     sources
         .into_iter()
-        .nth(fallback_index as usize)
+        .nth(index)
         .ok_or_else(|| format!("{kind} index {fallback_index} out of range"))
 }
 
@@ -726,10 +759,8 @@ mod tests {
     use super::{
         capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
         normalize_encoder_dimensions, next_screenkit_timeout_count, profile_max_dim,
-        should_abandon_screenkit_after_timeouts,
+        select_source_index, should_abandon_screenkit_after_timeouts,
     };
-    #[cfg(target_os = "macos")]
-    use super::select_source_by_id;
     use image::RgbaImage;
 
     #[test]
@@ -767,64 +798,85 @@ mod tests {
         assert_eq!(legacy_capture_source_id("screen", 2), "screen:2");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn source_id_selects_the_matching_native_source_before_the_legacy_index() {
-        let source = select_source_by_id(
-            vec![41_u32, 99_u32],
+        let index = select_source_index(
+            &["41".into(), "99".into()],
             Some("99"),
             0,
             "screen",
-            |id| Ok(*id),
         )
         .expect("stable source id selects a source");
 
-        assert_eq!(source, 99);
+        assert_eq!(index, 1);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn missing_source_id_falls_back_to_the_legacy_index() {
-        let source = select_source_by_id(
-            vec![41_u32, 99_u32],
+        let index = select_source_index(
+            &["41".into(), "99".into()],
             None,
             1,
             "screen",
-            |id| Ok(*id),
         )
         .expect("legacy index selects a source");
 
-        assert_eq!(source, 99);
+        assert_eq!(index, 1);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn empty_source_id_falls_back_to_the_legacy_index() {
-        let source = select_source_by_id(
-            vec![41_u32, 99_u32],
+        let index = select_source_index(
+            &["41".into(), "99".into()],
             Some(""),
             1,
             "screen",
-            |id| Ok(*id),
         )
         .expect("empty source id falls back to its index");
 
-        assert_eq!(source, 99);
+        assert_eq!(index, 1);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn legacy_screen_source_id_falls_back_to_the_legacy_index() {
-        let source = select_source_by_id(
-            vec![41_u32, 99_u32],
+        let index = select_source_index(
+            &["41".into(), "99".into()],
             Some("screen:1"),
             1,
             "screen",
-            |id| Ok(*id),
         )
         .expect("legacy source id falls back to its index");
 
-        assert_eq!(source, 99);
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn legacy_window_source_id_falls_back_to_the_legacy_index() {
+        let index = select_source_index(
+            &["41".into(), "99".into()],
+            Some("window:0"),
+            1,
+            "window",
+        )
+        .expect("legacy source id falls back to its index");
+
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn missing_native_source_id_is_an_explicit_error() {
+        let error = select_source_index(&["41".into()], Some("99"), 0, "screen")
+            .expect_err("a missing stable id must not select the fallback index");
+
+        assert_eq!(error, "screen source 99 is no longer available");
+    }
+
+    #[test]
+    fn out_of_range_legacy_index_is_an_explicit_error() {
+        let error = select_source_index(&["41".into()], None, 1, "screen")
+            .expect_err("out of range index must fail");
+
+        assert_eq!(error, "screen index 1 out of range");
     }
 
     #[test]
