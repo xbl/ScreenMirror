@@ -50,8 +50,15 @@ pub struct CaptureSourceInfo {
     pub source_id: String,
     pub name: String,
     pub kind: String,
+    pub is_primary: bool,
+    /// Reserved for a future capture thumbnail data URL.
+    pub preview: Option<String>,
     pub width: u32,
     pub height: u32,
+}
+
+fn legacy_capture_source_id(kind: &str, index: usize) -> String {
+    format!("{kind}:{index}")
 }
 
 /// Enumerate available capture sources (monitors + windows).
@@ -66,10 +73,12 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
             .enumerate()
         {
             out.push(CaptureSourceInfo {
-                id: format!("screen:{idx}"),
+                id: legacy_capture_source_id("screen", idx),
                 source_id: format!("screen:{}", m.id().unwrap_or(idx as u32)),
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
+                is_primary: m.is_primary().unwrap_or(false),
+                preview: None,
                 width: m.width().unwrap_or(0),
                 height: m.height().unwrap_or(0),
             });
@@ -81,10 +90,12 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                     continue;
                 }
                 out.push(CaptureSourceInfo {
-                    id: format!("window:{idx}"),
+                    id: legacy_capture_source_id("window", idx),
                     source_id: format!("window:{}", w.id().unwrap_or(idx as u32)),
                     name,
                     kind: "window".into(),
+                    is_primary: false,
+                    preview: None,
                     width: w.width().unwrap_or(0),
                     height: w.height().unwrap_or(0),
                 });
@@ -669,7 +680,10 @@ pub struct CaptureHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_bitrate_kbps, normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, profile_max_dim};
+    use super::{
+        capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
+        normalize_encoder_dimensions, profile_max_dim,
+    };
     use image::RgbaImage;
 
     #[test]
@@ -700,6 +714,11 @@ mod tests {
     fn screen_bitrate_scales_for_readable_text_without_lowering_fps() {
         assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) >= 3_500);
         assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) > capture_bitrate_kbps(960, 540, 15, 1.0));
+    }
+
+    #[test]
+    fn legacy_screen_source_id_uses_the_enumeration_index() {
+        assert_eq!(legacy_capture_source_id("screen", 2), "screen:2");
     }
 }
 

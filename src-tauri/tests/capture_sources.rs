@@ -21,6 +21,8 @@ fn capture_source_info_serializes_the_source_identifier() {
         source_id: "screen:69733440".into(),
         name: "Studio Display".into(),
         kind: "screen".into(),
+        is_primary: true,
+        preview: None,
         width: 5120,
         height: 2880,
     };
@@ -29,6 +31,8 @@ fn capture_source_info_serializes_the_source_identifier() {
     assert_eq!(value["id"], "screen:0");
     assert_eq!(value["sourceId"], "screen:69733440");
     assert_eq!(value["kind"], "screen");
+    assert_eq!(value["isPrimary"], true);
+    assert!(value["preview"].is_null());
 }
 
 #[test]

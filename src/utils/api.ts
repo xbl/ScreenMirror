@@ -46,6 +46,8 @@ export type CaptureSourceInfo = {
   sourceId: string;
   name: string;
   kind: 'screen' | 'window';
+  isPrimary: boolean;
+  preview: string | null;
   width: number;
   height: number;
 };
