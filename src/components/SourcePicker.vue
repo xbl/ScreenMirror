@@ -10,39 +10,41 @@
     <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
 
     <div v-if="loading" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
-    <div v-else-if="sources.length === 0" class="sp-empty">{{ t('source.noSources') }}</div>
     <div v-else class="sp-content">
       <div class="sp-groups">
-        <section v-for="group in sourceGroups" :key="group.key" class="sp-group">
-          <h2 class="sp-group-title">{{ t(group.label) }}</h2>
-          <div class="sp-source-list">
-            <button
-              v-for="item in group.items"
-              :key="item.sourceId"
-              class="sp-source"
-              :class="{ selected: item.sourceId === selectedSource?.sourceId }"
-              type="button"
-              :data-source-id="item.sourceId"
-              :aria-pressed="item.sourceId === selectedSource?.sourceId"
-              @click="selectSource(item)"
-            >
-              <span class="sp-thumb" aria-hidden="true">
-                <img v-if="item.preview" :src="item.preview" alt="" />
-                <span v-else class="sp-thumb-fallback" />
-              </span>
-              <span class="sp-source-copy">
-                <span class="sp-source-name">{{ item.name }}</span>
-                <span class="sp-source-meta">
-                  <span v-if="item.isPrimary" class="sp-primary">{{ t('source.primary') }}</span>
-                  <span>{{ resolution(item) }}</span>
+        <template v-if="sourceGroups.length">
+          <section v-for="group in sourceGroups" :key="group.key" class="sp-group">
+            <h2 class="sp-group-title">{{ t(group.label) }}</h2>
+            <div class="sp-source-list">
+              <button
+                v-for="item in group.items"
+                :key="item.sourceId"
+                class="sp-source"
+                :class="{ selected: item.sourceId === selectedSource?.sourceId }"
+                type="button"
+                :data-source-id="item.sourceId"
+                :aria-pressed="item.sourceId === selectedSource?.sourceId"
+                @click="selectSource(item)"
+              >
+                <span v-if="item.preview" class="sp-thumb" aria-hidden="true">
+                  <img :src="item.preview" alt="" />
                 </span>
-              </span>
-            </button>
-          </div>
-        </section>
+                <span v-else class="sp-no-preview">{{ t('source.noPreview') }}</span>
+                <span class="sp-source-copy">
+                  <span class="sp-source-name">{{ item.name }}</span>
+                  <span class="sp-source-meta">
+                    <span v-if="item.isPrimary" class="sp-primary">{{ t('source.primary') }}</span>
+                    <span>{{ resolution(item) }}</span>
+                  </span>
+                </span>
+              </button>
+            </div>
+          </section>
+        </template>
+        <div v-else class="sp-empty">{{ t('source.noSources') }}</div>
       </div>
 
-      <aside class="sp-preview" data-testid="source-preview" aria-live="polite">
+      <aside v-if="selectedSource" class="sp-preview" data-testid="source-preview" aria-live="polite">
         <div class="sp-preview-frame">
           <img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" />
           <span v-else class="sp-preview-fallback">{{ t('source.noPreview') }}</span>
@@ -82,6 +84,7 @@ const selectedSource = ref<CaptureSourceInfo | null>(null);
 const quality = ref<Quality>('high');
 const error = ref('');
 const loading = ref(false);
+let captureOperation = 0;
 
 const permissionModal = inject<ProvidedPermissionModal>(
   PermissionModalKey,
@@ -139,15 +142,19 @@ async function ensurePermission() {
 }
 
 async function selectSource(source: CaptureSourceInfo, nextQuality = quality.value) {
+  const operation = ++captureOperation;
   error.value = '';
   if (!(await ensurePermission())) return false;
+  if (operation !== captureOperation) return false;
 
   try {
     await api.setCaptureTarget(captureTarget(source, nextQuality));
+    if (operation !== captureOperation) return false;
     selectedSource.value = source;
     quality.value = nextQuality;
     return true;
   } catch {
+    if (operation !== captureOperation) return false;
     error.value = t('source.errorSwitch');
     return false;
   }
@@ -311,11 +318,15 @@ onMounted(() => {
   object-fit: cover;
 }
 
-.sp-thumb-fallback {
-  width: 58%;
-  height: 48%;
-  border: 1px solid var(--muted-2);
-  border-radius: 2px;
+.sp-no-preview {
+  display: grid;
+  min-height: 36px;
+  padding: var(--sp-1);
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.625rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .sp-source-copy,

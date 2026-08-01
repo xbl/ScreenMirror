@@ -83,6 +83,14 @@ function mountPicker() {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('SourcePicker', () => {
   beforeEach(() => {
     apiMocks.checkScreenRecordingPermission.mockResolvedValue(true);
@@ -173,5 +181,57 @@ describe('SourcePicker', () => {
     expect(apiMocks.setCaptureTarget).not.toHaveBeenCalled();
     expect(wrapper.find('[data-testid="source-preview"]').text()).toContain('Built-in Retina Display');
     expect(wrapper.text()).toContain('The current source is no longer available.');
+  });
+
+  it('only sends the latest rapidly selected source after an out-of-order permission check', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    const firstPermission = deferred<boolean>();
+    apiMocks.setCaptureTarget.mockClear();
+    apiMocks.checkScreenRecordingPermission
+      .mockImplementationOnce(() => firstPermission.promise)
+      .mockResolvedValueOnce(true);
+
+    await wrapper.get('[data-source-id="desk-display"]').trigger('click');
+    await wrapper.get('[data-source-id="terminal-window"]').trigger('click');
+    await flushPromises();
+    firstPermission.resolve(true);
+    await flushPromises();
+
+    expect(apiMocks.setCaptureTarget).toHaveBeenCalledTimes(1);
+    expect(apiMocks.setCaptureTarget).toHaveBeenCalledWith({
+      kind: 'window',
+      id: 0,
+      sourceId: 'terminal-window',
+      quality: 0.75,
+    });
+    expect(wrapper.find('[data-source-id="terminal-window"]').classes()).toContain('selected');
+  });
+
+  it('keeps the selected preview visible when a refresh returns no sources', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([]);
+
+    await wrapper.get('.sp-refresh').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="source-preview"]').text()).toContain('Built-in Retina Display');
+    expect(wrapper.text()).toContain('The current source is no longer available.');
+    expect(wrapper.text()).toContain('No shareable sources are available.');
+  });
+
+  it('labels null previews as unavailable instead of rendering a thumbnail', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    await wrapper.get('[data-source-id="terminal-window"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[data-source-id="terminal-window"] .sp-no-preview').text()).toBe(
+      'No preview available',
+    );
+    expect(wrapper.get('[data-testid="source-preview"]').text()).toContain('No preview available');
+    expect(wrapper.find('[data-testid="source-preview"] img').exists()).toBe(false);
   });
 });
