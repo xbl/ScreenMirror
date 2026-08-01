@@ -12,9 +12,7 @@ export default {
     deviceOs: '系统',
     connectionId: '连接 ID',
     ipHelp: '请确认该 IP 与主机应用中显示的一致。',
-    notAllowed: '主机未允许你连接',
     disconnected: '连接已断开',
-    unknown: '发生未知错误',
   },
   controls: {
     play: '播放',

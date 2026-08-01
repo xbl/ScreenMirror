@@ -12,9 +12,7 @@ export default {
     deviceOs: 'OS',
     connectionId: 'Connection ID',
     ipHelp: 'Verify this IP matches the one shown in the host app.',
-    notAllowed: 'You were not allowed to connect',
     disconnected: 'You were disconnected',
-    unknown: 'An unknown error occurred',
   },
   controls: {
     play: 'Play',

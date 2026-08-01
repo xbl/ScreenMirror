@@ -1,7 +1,7 @@
 <template>
   <div v-if="open" class="error-dialog-backdrop">
     <div class="error-dialog">
-      <h2>{{ t('viewer.unknown') }}</h2>
+      <h2>{{ t('viewer.disconnected') }}</h2>
       <p>{{ message }}</p>
       <button @click="$emit('close')">×</button>
     </div>

@@ -28,7 +28,7 @@ const prompts: Record<number, string> = {
   3: t('viewer.waitingForSource'),
 };
 
-const text = computed(() => prompts[props.step] ?? t('viewer.unknown'));
+const text = computed(() => prompts[props.step] ?? t('viewer.disconnected'));
 </script>
 
 <style scoped>

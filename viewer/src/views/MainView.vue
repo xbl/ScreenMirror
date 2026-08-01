@@ -26,10 +26,8 @@ function onState(step: number) {
   if (step === 2) streaming.value = true;
 }
 
-function onError(message: string) {
-  if (message === 'NOT_ALLOWED') errorMessage.value = t('viewer.notAllowed');
-  else if (message === 'DISCONNECTED') errorMessage.value = t('viewer.disconnected');
-  else errorMessage.value = message;
+function onError(_message: string) {
+  errorMessage.value = t('viewer.disconnected');
 }
 
 function reload() {
