@@ -684,6 +684,8 @@ mod tests {
         capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
         normalize_encoder_dimensions, profile_max_dim,
     };
+    #[cfg(target_os = "macos")]
+    use super::select_source_by_id;
     use image::RgbaImage;
 
     #[test]
@@ -719,6 +721,36 @@ mod tests {
     #[test]
     fn legacy_screen_source_id_uses_the_enumeration_index() {
         assert_eq!(legacy_capture_source_id("screen", 2), "screen:2");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn source_id_selects_the_matching_native_source_before_the_legacy_index() {
+        let source = select_source_by_id(
+            vec![41_u32, 99_u32],
+            Some("screen:99"),
+            0,
+            "screen",
+            |id| Ok(*id),
+        )
+        .expect("stable source id selects a source");
+
+        assert_eq!(source, 99);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn missing_source_id_falls_back_to_the_legacy_index() {
+        let source = select_source_by_id(
+            vec![41_u32, 99_u32],
+            None,
+            1,
+            "screen",
+            |id| Ok(*id),
+        )
+        .expect("legacy index selects a source");
+
+        assert_eq!(source, 99);
     }
 }
 
