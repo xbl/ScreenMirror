@@ -17,12 +17,6 @@
           <span class="st-value st-mono">{{ version || '—' }}</span>
         </section>
 
-        <section class="st-section">
-          <button class="btn btn-ghost" type="button" @click="openPrivacy">
-            {{ t('privacy.title') }}
-          </button>
-        </section>
-
         <footer class="st-foot">
           <button class="btn btn-ghost" type="button" @click="onReset">
             {{ t('app.reset') }}
@@ -35,14 +29,12 @@
     </div>
   </Teleport>
 
-  <PrivacyDialog :open="showPrivacy" @close="showPrivacy = false" />
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import LanguageSelector from './LanguageSelector.vue';
-import PrivacyDialog from './PrivacyDialog.vue';
 import { api } from '../utils/api';
 
 defineProps<{ open: boolean }>();
@@ -53,7 +45,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const version = ref('');
-const showPrivacy = ref(false);
 
 onMounted(async () => {
   try {
@@ -62,10 +53,6 @@ onMounted(async () => {
     version.value = '';
   }
 });
-
-function openPrivacy() {
-  showPrivacy.value = true;
-}
 
 async function onReset() {
   try {

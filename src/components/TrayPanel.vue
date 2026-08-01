@@ -8,8 +8,11 @@
           <h1>{{ t('tray.title') }}</h1>
         </div>
       </div>
-      <button class="tray-close" type="button" :aria-label="t('tray.close')" @click="close">
-        ×
+      <button class="tray-settings" type="button" :aria-label="t('settings.title')" @click="showSettings = true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+          <path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.7a1.8 1.8 0 0 1 0-3h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3h-.2a1.8 1.8 0 0 0-.9 3Z" />
+        </svg>
       </button>
     </header>
 
@@ -25,9 +28,6 @@
         <button class="tray-action" type="button" @click="showDevices = true">
           <span>{{ t('devices.title') }}</span>
           <strong>{{ viewerCount }}</strong>
-        </button>
-        <button class="tray-action" type="button" @click="showSettings = true">
-          {{ t('settings.title') }}
         </button>
       </div>
     </section>
@@ -114,14 +114,6 @@ async function onReset() {
   await checkPermission();
 }
 
-async function close() {
-  try {
-    await api.closeTrayPanel();
-  } catch {
-    window.close();
-  }
-}
-
 onMounted(() => {
   void refreshState();
   poll = window.setInterval(refreshState, 2000);
@@ -179,21 +171,29 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.tray-close {
+.tray-settings {
   display: grid;
   width: 32px;
   height: 32px;
   place-items: center;
   color: var(--muted);
-  font-size: 23px;
-  line-height: 1;
   border: 0;
   border-radius: 50%;
   background: var(--surface-2);
   cursor: pointer;
 }
 
-.tray-close:hover {
+.tray-settings svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.tray-settings:hover {
   color: var(--text-strong);
   background: var(--surface-3);
 }
@@ -236,7 +236,7 @@ onBeforeUnmount(() => {
 
 .tray-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 10px;
 }

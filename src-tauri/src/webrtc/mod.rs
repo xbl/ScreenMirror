@@ -807,7 +807,10 @@ pub fn spawn_video_capture_loop(
         let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen)
             && std::env::var("SCREENMIRROR_USE_IOSURFACE")
                 .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
+                // ScreenCaptureKit delivers frames at the requested cadence;
+                // xcap's recorder can block for 200ms+ on high-DPI displays.
+                // Keep an explicit opt-out for diagnostics and older macOS.
+                .unwrap_or(true);
         #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
         let use_screenkit_capture = false;
         #[cfg(target_os = "macos")]

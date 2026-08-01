@@ -48,7 +48,7 @@ export default {
     refresh: '刷新源',
     quality: '画质',
     qualityBalanced: '平衡 · 1920px',
-    qualityHigh: '高画质 · 2560px',
+    qualityHigh: '高画质 · 1920px',
     qualityUltra: '超清 · 3840px',
     errorPermission: '需要屏幕录制权限才能载入分享来源。',
     errorEnumerate: '无法载入可分享的来源，请重试。',
@@ -113,13 +113,5 @@ export default {
     deviceBrowser: '浏览器',
     deviceOs: '系统',
     connectionId: '连接 ID',
-  },
-  privacy: {
-    title: '不收集数据',
-    intro: 'Screenmirror 不收集任何分析、崩溃报告或使用数据。',
-    bullet1: '没有分析、遥测或第三方追踪。',
-    bullet2: '屏幕画面只在你的设备之间通过本地网络传输。',
-    bullet3: '源码开放,可随时审查。',
-    close: '关闭',
   },
 };

@@ -48,7 +48,7 @@ export default {
     refresh: 'Refresh sources',
     quality: 'Quality',
     qualityBalanced: 'Balanced · 1920px',
-    qualityHigh: 'High · 2560px',
+    qualityHigh: 'High · 1920px',
     qualityUltra: 'Ultra · 3840px',
     errorPermission: 'Screen Recording permission is required to load sources.',
     errorEnumerate: 'Could not load available sources. Please try again.',
@@ -114,14 +114,5 @@ export default {
     deviceBrowser: 'Browser',
     deviceOs: 'OS',
     connectionId: 'Connection ID',
-  },
-  privacy: {
-    title: 'No analytics',
-    intro:
-      'Screenmirror does not collect analytics, crash reports, or any usage data.',
-    bullet1: 'No analytics, telemetry, or third-party tracking.',
-    bullet2: 'Screen frames stay on your local network between your devices.',
-    bullet3: 'Source code is open for review.',
-    close: 'Close',
   },
 };

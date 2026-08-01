@@ -6,6 +6,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Runtime};
 
+#[cfg(target_os = "macos")]
+fn tray_template_icon(icon: &tauri::image::Image<'_>) -> tauri::image::Image<'static> {
+    let mut rgba = icon.rgba().to_vec();
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel[0] = 255;
+        pixel[1] = 255;
+        pixel[2] = 255;
+    }
+    tauri::image::Image::new_owned(rgba, icon.width(), icon.height())
+}
+
 static LAST_TRAY_CLICK: std::sync::OnceLock<Mutex<Option<Instant>>> = std::sync::OnceLock::new();
 
 fn position_tray_panel(
@@ -194,11 +205,19 @@ pub fn run() {
             commands::set_capture_target,
         ])
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            {
+                // This is a menu-bar application; keep it out of the Dock.
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let _ = app.set_dock_visibility(false);
+            }
             // The tray icon is intentionally menu-less. Clicking it opens the
             // AirPlay-style quick-share window instead of stacking a native
             // menu next to that window.
             let handle = app.handle().clone();
             if let Some(icon) = app.default_window_icon().cloned() {
+                #[cfg(target_os = "macos")]
+                let icon = tray_template_icon(&icon);
                 let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
                     .icon(icon)
                     .tooltip("Screenmirror")
