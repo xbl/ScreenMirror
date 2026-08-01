@@ -3,7 +3,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
 use image::RgbaImage;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 use std::collections::HashMap;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex};
@@ -64,7 +64,7 @@ pub struct CaptureSourceInfo {
 const PREVIEW_MAX_DIMENSION: u32 = 320;
 const PREVIEW_JPEG_QUALITY: u8 = 60;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 struct PreviewCacheKey {
     source_id: String,
@@ -72,9 +72,47 @@ struct PreviewCacheKey {
     height: u32,
 }
 
+#[cfg(any(target_os = "macos", test))]
+#[derive(Default)]
+struct DisplayPreviewCache {
+    previews: HashMap<PreviewCacheKey, String>,
+    epochs: HashMap<PreviewCacheKey, u64>,
+}
+
 #[cfg(target_os = "macos")]
-static DISPLAY_PREVIEW_CACHE: std::sync::OnceLock<Mutex<HashMap<PreviewCacheKey, String>>> =
+static DISPLAY_PREVIEW_CACHE: std::sync::OnceLock<Mutex<DisplayPreviewCache>> =
     std::sync::OnceLock::new();
+
+#[cfg(any(target_os = "macos", test))]
+fn begin_preview_request(
+    cache: &mut DisplayPreviewCache,
+    key: &PreviewCacheKey,
+    force_refresh: bool,
+) -> (u64, Option<String>) {
+    if force_refresh {
+        let epoch = cache.epochs.entry(key.clone()).or_insert(0);
+        *epoch = epoch.wrapping_add(1);
+        cache.previews.remove(key);
+        return (*epoch, None);
+    }
+
+    (
+        *cache.epochs.get(key).unwrap_or(&0),
+        cache.previews.get(key).cloned(),
+    )
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn store_preview_if_current(
+    cache: &mut DisplayPreviewCache,
+    key: &PreviewCacheKey,
+    epoch: u64,
+    preview: String,
+) {
+    if cache.epochs.get(key).copied().unwrap_or(0) == epoch {
+        cache.previews.insert(key.clone(), preview);
+    }
+}
 
 fn preview_from_capture_result(capture: Result<RgbaImage, String>) -> Option<String> {
     capture
@@ -124,13 +162,13 @@ fn capture_monitor_preview(
         width,
         height,
     };
-    let cache = DISPLAY_PREVIEW_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if !force_refresh {
-        if let Ok(cache) = cache.lock() {
-            if let Some(preview) = cache.get(&key) {
-                return Some(preview.clone());
-            }
-        }
+    let cache = DISPLAY_PREVIEW_CACHE.get_or_init(|| Mutex::new(DisplayPreviewCache::default()));
+    let (epoch, cached_preview) = match cache.lock() {
+        Ok(mut cache) => begin_preview_request(&mut cache, &key, force_refresh),
+        Err(_) => (0, None),
+    };
+    if let Some(preview) = cached_preview {
+        return Some(preview);
     }
 
     let capture = monitor.capture_image().map_err(|error| error.to_string()).and_then(|image| {
@@ -144,11 +182,7 @@ fn capture_monitor_preview(
 
     if let Some(preview) = preview.as_ref() {
         if let Ok(mut cache) = cache.lock() {
-            // A normal request that began before a forced refresh must not put
-            // its stale image back into the cache after the refresh completes.
-            if force_refresh || !cache.contains_key(&key) {
-                cache.insert(key, preview.clone());
-            }
+            store_preview_if_current(&mut cache, &key, epoch, preview.clone());
         }
     }
     preview
@@ -893,10 +927,11 @@ pub struct CaptureHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
-        normalize_encoder_dimensions, next_screenkit_timeout_count, profile_max_dim,
-        profile_fps, preview_dimensions, preview_from_capture_result, select_source_index,
-        should_abandon_screenkit_after_timeouts,
+        begin_preview_request, capture_bitrate_kbps, legacy_capture_source_id,
+        normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions,
+        next_screenkit_timeout_count, profile_max_dim, profile_fps, preview_dimensions,
+        preview_from_capture_result, select_source_index, should_abandon_screenkit_after_timeouts,
+        store_preview_if_current, DisplayPreviewCache, PreviewCacheKey,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use image::RgbaImage;
@@ -1055,6 +1090,28 @@ mod tests {
         let preview = preview_from_capture_result(Err("Screen Recording permission denied".into()));
 
         assert!(preview.is_none());
+    }
+
+    #[test]
+    fn forced_preview_refresh_evicts_old_cache_after_capture_failure() {
+        let key = PreviewCacheKey {
+            source_id: "display-1".into(),
+            width: 1920,
+            height: 1080,
+        };
+        let mut cache = DisplayPreviewCache::default();
+        cache.previews.insert(key.clone(), "old-preview".into());
+
+        let (old_epoch, cached) = begin_preview_request(&mut cache, &key, false);
+        assert_eq!(cached.as_deref(), Some("old-preview"));
+
+        let (_, forced_cached) = begin_preview_request(&mut cache, &key, true);
+        assert!(forced_cached.is_none());
+        // Simulate an older capture completing after the forced one failed.
+        store_preview_if_current(&mut cache, &key, old_epoch, "stale-preview".into());
+
+        let (_, cached_after_failure) = begin_preview_request(&mut cache, &key, false);
+        assert!(cached_after_failure.is_none());
     }
 }
 
