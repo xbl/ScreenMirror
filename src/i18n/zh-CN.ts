@@ -60,7 +60,6 @@ export default {
     idle: '开始分享',
     sharing: '分享中',
     stop: '停止',
-    stopHint: '停止分享后才能切换分享源',
   },
   topbar: {
     settings: '设置',

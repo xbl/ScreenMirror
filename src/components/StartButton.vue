@@ -20,7 +20,6 @@
         {{ t('start.stop') }}
       </button>
     </div>
-    <p v-if="sharing" class="start-hint">{{ t('start.stopHint') }}</p>
   </div>
 </template>
 
@@ -182,12 +181,6 @@ async function onStop() {
 .start-stop:hover {
   background: var(--surface-3);
   border-color: var(--muted);
-}
-
-.start-hint {
-  font-size: var(--fs-12);
-  color: var(--muted);
-  padding-left: var(--sp-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

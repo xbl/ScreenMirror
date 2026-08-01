@@ -60,7 +60,6 @@ export default {
     idle: 'Start sharing',
     sharing: 'Sharing',
     stop: 'Stop',
-    stopHint: 'Stop sharing to switch sources',
   },
   topbar: {
     settings: 'Settings',
