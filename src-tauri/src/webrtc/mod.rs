@@ -73,6 +73,14 @@ fn should_abandon_screenkit_after_timeouts(consecutive_timeouts: u8) -> bool {
     consecutive_timeouts >= SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS
 }
 
+fn next_screenkit_timeout_count(consecutive_timeouts: u8, timed_out: bool) -> u8 {
+    if timed_out {
+        consecutive_timeouts.saturating_add(1)
+    } else {
+        0
+    }
+}
+
 /// Enumerate available capture sources (monitors + windows).
 pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     #[cfg(target_os = "macos")]
@@ -611,12 +619,13 @@ pub fn spawn_video_capture_loop(
             let captured = if let Some(screenkit_result) = screenkit_result {
                 match screenkit_result {
                     Ok(frame) => {
-                        screenkit_consecutive_timeouts = 0;
+                        screenkit_consecutive_timeouts =
+                            next_screenkit_timeout_count(screenkit_consecutive_timeouts, false);
                         captured_frame_from_screenkit(frame, target.quality)
                     }
                     Err(ScreenKitError::Unavailable(_)) => {
                         screenkit_consecutive_timeouts =
-                            screenkit_consecutive_timeouts.saturating_add(1);
+                            next_screenkit_timeout_count(screenkit_consecutive_timeouts, true);
                         if should_abandon_screenkit_after_timeouts(
                             screenkit_consecutive_timeouts,
                         ) {
@@ -716,7 +725,8 @@ pub struct CaptureHandle {
 mod tests {
     use super::{
         capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
-        normalize_encoder_dimensions, profile_max_dim,
+        normalize_encoder_dimensions, next_screenkit_timeout_count, profile_max_dim,
+        should_abandon_screenkit_after_timeouts,
     };
     #[cfg(target_os = "macos")]
     use super::select_source_by_id;
@@ -821,6 +831,7 @@ mod tests {
     fn screenkit_timeout_threshold_allows_three_missed_intervals() {
         assert!(!should_abandon_screenkit_after_timeouts(2));
         assert!(should_abandon_screenkit_after_timeouts(3));
+        assert_eq!(next_screenkit_timeout_count(2, false), 0);
     }
 }
 
