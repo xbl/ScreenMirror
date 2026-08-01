@@ -1,56 +1,45 @@
-# Multi-display sharing design
+# 多屏共享设计
 
-## Goal
+## 目标
 
-Allow a host with one or more displays to choose exactly one display to share.
-The interaction should resemble AirPlay's source chooser: three source groups
-(`Entire screen`, `Window or App`, and `Extended display`), with the display group
-showing selectable entries for each connected monitor. The local-network
-WebRTC viewer remains a single continuous stream.
+允许拥有一个或多个显示器的 Host 选择其中一个进行共享。交互参考 AirPlay
+的来源选择器，提供三组来源（`整个屏幕`、`窗口或 App`、`扩展显示器`），
+其中“扩展显示器”展示每个已连接显示器。局域网 WebRTC Viewer 保持为同一条
+连续视频流。
 
-## User experience
+## 用户体验
 
-- On startup, enumerate displays and windows after the screen-recording
-  permission check.
-- Render a compact source chooser with the three AirPlay-style groups. The
-  selected display entry shows a small preview, display name, resolution, and a
-  primary-display marker. No preview is used as the encoded stream.
-- Selecting a display before sharing sets the next capture target. Selecting a
-  different display while sharing applies immediately without a new QR scan or
-  WebRTC renegotiation.
-- If a selected display disappears or capture permission is lost, keep the
-  current stream alive, report the selection error, and leave the previous
-  target active.
+- 启动后，在完成屏幕录制权限检查后枚举显示器和窗口。
+- 使用紧凑的 AirPlay 风格来源选择器。选中的显示器显示小缩略图、名称、
+  分辨率和主屏标记。缩略图只用于选择，不参与视频编码。
+- 共享前选择显示器时，设置下一次采集目标。共享中切换显示器时立即生效，
+  不需要重新扫码或重新协商 WebRTC。
+- 如果选中的显示器被拔出或屏幕录制权限失效，保持当前视频流，报告切换
+  错误，并继续使用之前的目标。
 
-## Architecture
+## 架构
 
-`CaptureSourceInfo` gains a stable source identifier, `is_primary`, and an
-optional preview payload. macOS enumeration derives display metadata from xcap
-and maps it to ScreenCaptureKit's display identifier; index fallback is retained
-for older APIs and non-macOS stubs.
+`CaptureSourceInfo` 增加稳定来源标识、`is_primary` 和可选缩略图数据。macOS
+枚举逻辑从 xcap 获取显示器元数据，并映射到 ScreenCaptureKit 的显示器标识；
+旧 API 和非 macOS stub 保留索引回退机制。
 
-`set_capture_target` updates both the pending target and the active host peer.
-The peer owns a replaceable capture handle. A target change stops the old loop,
-discards queued frames, creates a new encoder when dimensions change, and starts
-the new loop while preserving the socket, RTP writer, and viewer connection.
-The first keyframe from the new target is allowed through the existing stale-frame
-gate.
+`set_capture_target` 同时更新待启动目标和当前 HostPeer 的活动目标。Peer 持有
+可替换的采集句柄。切换目标时停止旧循环、丢弃队列中的旧帧，在分辨率变化时
+创建新的编码器，并启动新循环；Socket、RTP Writer 和 Viewer 连接保持不变。
+新目标的第一关键帧允许通过现有的过期帧过滤逻辑。
 
-## Failure handling
+## 失败处理
 
-Enumeration failures return an empty state with an actionable permission/error
-message. A failed target switch is transactional: the old capture handle and
-target remain active. Display removal is detected both during enumeration and
-when a capture loop reports an out-of-range target.
+枚举失败时返回空状态并显示可操作的权限或错误提示。目标切换采用事务语义：
+如果新目标启动失败，旧采集句柄和旧目标保持活动状态。显示器移除既在枚举
+阶段检测，也在采集循环报告目标越界时检测。
 
-## Verification
+## 验证
 
-- Rust unit tests cover stable display mapping, target replacement, rollback on
-  failed capture, and non-macOS enumeration stubs.
-- Vue tests cover group rendering, selected display metadata, and disabled/error
-  states.
-- Run `cargo check --release`, relevant Rust tests, `npx vue-tsc --noEmit`, and
-  `cd viewer && npm run build`.
-- Run the real-screen headless diagnostic with two displays when available;
-  verify continuous frames, no Viewer watchdog errors, and target switch below
-  500 ms. A single-display environment must still pass the existing diagnostic.
+- Rust 单元测试覆盖稳定显示器映射、目标替换、采集失败回滚和非 macOS 枚举
+  stub。
+- Vue 测试覆盖来源分组、选中显示器元数据以及禁用和错误状态。
+- 执行 `cargo check --release`、相关 Rust 测试、`npx vue-tsc --noEmit` 和
+  `cd viewer && npm run build`。
+- 在可用的双屏环境中运行真实屏幕 headless 诊断，验证画面持续更新、Viewer
+  无 watchdog 错误且切换延迟低于 500ms。单屏环境仍必须通过现有诊断。
