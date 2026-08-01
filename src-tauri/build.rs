@@ -5,18 +5,43 @@ fn main() {
     let ffmpeg_dir = env::var("FFMPEG_DIR").unwrap_or_else(|_| "/usr/local/opt/ffmpeg".to_string());
     let ffmpeg_include = PathBuf::from(&ffmpeg_dir).join("include");
 
-    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavcodec/avcodec.h").display());
-    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/avutil.h").display());
-    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/opt.h").display());
-    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libavutil/pixfmt.h").display());
-    println!("cargo:rerun-if-changed={}", ffmpeg_include.join("libswscale/swscale.h").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        ffmpeg_include.join("libavcodec/avcodec.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ffmpeg_include.join("libavutil/avutil.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ffmpeg_include.join("libavutil/opt.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ffmpeg_include.join("libavutil/pixfmt.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ffmpeg_include.join("libswscale/swscale.h").display()
+    );
     println!("cargo:rerun-if-changed=build.rs");
 
     let bindings = bindgen::Builder::default()
-        .header(ffmpeg_include.join("libavcodec/avcodec.h").to_str().unwrap())
+        .header(
+            ffmpeg_include
+                .join("libavcodec/avcodec.h")
+                .to_str()
+                .unwrap(),
+        )
         .header(ffmpeg_include.join("libavutil/avutil.h").to_str().unwrap())
         .header(ffmpeg_include.join("libavutil/opt.h").to_str().unwrap())
-        .header(ffmpeg_include.join("libswscale/swscale.h").to_str().unwrap())
+        .header(
+            ffmpeg_include
+                .join("libswscale/swscale.h")
+                .to_str()
+                .unwrap(),
+        )
         .header(ffmpeg_include.join("libavutil/pixfmt.h").to_str().unwrap())
         .clang_arg(format!("-I{}", ffmpeg_include.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -77,10 +102,7 @@ fn main() {
     println!("cargo:rustc-link-lib=swscale");
 
     let ffmpeg_lib = PathBuf::from(&ffmpeg_dir).join("lib");
-    println!(
-        "cargo:rustc-link-search=native={}",
-        ffmpeg_lib.display()
-    );
+    println!("cargo:rustc-link-search=native={}", ffmpeg_lib.display());
 
     // Tauri's own build steps still need to run.
     tauri_build::build();

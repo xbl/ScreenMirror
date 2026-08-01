@@ -245,16 +245,21 @@ pub struct CaptureTargetState {
 
 #[tauri::command]
 pub fn get_capture_target(state: State<'_, CommandState>) -> Option<CaptureTargetState> {
-    state.capture_target.lock().as_ref().map(|target| CaptureTargetState {
-        kind: match target.kind {
-            crate::webrtc::CaptureKind::Screen => "screen",
-            crate::webrtc::CaptureKind::Window => "window",
-            crate::webrtc::CaptureKind::TestPattern => "test",
-        }.into(),
-        id: target.id,
-        source_id: target.source_id.clone(),
-        quality: target.quality,
-    })
+    state
+        .capture_target
+        .lock()
+        .as_ref()
+        .map(|target| CaptureTargetState {
+            kind: match target.kind {
+                crate::webrtc::CaptureKind::Screen => "screen",
+                crate::webrtc::CaptureKind::Window => "window",
+                crate::webrtc::CaptureKind::TestPattern => "test",
+            }
+            .into(),
+            id: target.id,
+            source_id: target.source_id.clone(),
+            quality: target.quality,
+        })
 }
 
 #[tauri::command]
@@ -270,9 +275,10 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("index.html?source-picker=1".into()),
     )
     .title("Screenmirror")
-    .inner_size(560.0, 720.0)
-    .min_inner_size(480.0, 560.0)
+    .inner_size(720.0, 680.0)
+    .min_inner_size(560.0, 520.0)
     .resizable(false)
+    // The picker owns its chrome so it can match the AirPlay-style layout.
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
@@ -319,7 +325,12 @@ pub fn set_capture_target(
     };
     let fps = crate::webrtc::profile_fps(target.quality);
     let _transaction = state.capture_target_switch_lock.lock();
-    let peers = state.host_peers.lock().values().cloned().collect::<Vec<_>>();
+    let peers = state
+        .host_peers
+        .lock()
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
     if peers.is_empty() {
         validate_target_for_empty_peer_set(&target, |candidate| {
             crate::webrtc::capture_one_at(candidate, 0).map(|_| ())

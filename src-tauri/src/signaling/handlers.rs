@@ -14,7 +14,13 @@ use axum::{
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{path::PathBuf, sync::{Arc, atomic::{AtomicU64, Ordering}}};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -225,7 +231,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
         return;
     }
 
-    let connection_id = format!("{}-{}", room_id, NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed));
+    let connection_id = format!(
+        "{}-{}",
+        room_id,
+        NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed)
+    );
 
     // Per-connection outbound mpsc — host pushes (ANSWER/ICE) here directly.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
@@ -288,17 +298,18 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                 };
                                 let res = peer_entry.accept_offer(sdp);
                                 if res.is_ok() {
-                                    let target = state.capture_target.lock().clone().or_else(|| {
-                                        tracing::warn!(
+                                    let target =
+                                        state.capture_target.lock().clone().or_else(|| {
+                                            tracing::warn!(
                                             "no capture target selected; defaulting to screen 0"
                                         );
-                                        Some(crate::webrtc::CaptureTarget {
-                                            kind: crate::webrtc::CaptureKind::Screen,
-                                            id: 0,
-                                            source_id: None,
-                                            quality: 0.75,
-                                        })
-                                    });
+                                            Some(crate::webrtc::CaptureTarget {
+                                                kind: crate::webrtc::CaptureKind::Screen,
+                                                id: 0,
+                                                source_id: None,
+                                                quality: 0.75,
+                                            })
+                                        });
                                     if let Some(target) = target {
                                         let fps = crate::webrtc::profile_fps(target.quality);
                                         if let Err(error) = peer_entry.clone().start_sharing(

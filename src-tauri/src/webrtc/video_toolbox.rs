@@ -147,11 +147,10 @@ pub fn normalize_h264_extradata_to_annex_b(raw: &[u8]) -> Vec<u8> {
     raw.to_vec()
 }
 
-pub use crate::webrtc::video_toolbox_native::NativeVideoEncoder as VideoEncoder;
 pub use crate::webrtc::video_toolbox_iosurface::{
-    is_available as iosurface_encoder_available, IOSurfaceEncoderError,
-    IOSurfaceVideoEncoder,
+    is_available as iosurface_encoder_available, IOSurfaceEncoderError, IOSurfaceVideoEncoder,
 };
+pub use crate::webrtc::video_toolbox_native::NativeVideoEncoder as VideoEncoder;
 
 #[cfg(test)]
 mod tests {
@@ -237,8 +236,8 @@ mod tests {
     fn annex_b_avcc_annex_b_round_trip() {
         let original: &[u8] = &[
             0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1e, 0xab, 0xcd, // SPS
-            0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80,             // PPS
-            0, 0, 0, 1, 0x65, 0x88, 0x80, 0x40,             // IDR slice
+            0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80, // PPS
+            0, 0, 0, 1, 0x65, 0x88, 0x80, 0x40, // IDR slice
         ];
         let avcc = annex_b_to_avcc(original).unwrap();
         let recovered = normalize_h264_extradata_to_annex_b(&avcc);

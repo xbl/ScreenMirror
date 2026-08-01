@@ -17,11 +17,12 @@ pub mod video_toolbox_iosurface;
 pub mod video_toolbox_native;
 
 pub use host::HostPeer;
-pub use screencapturekit_capture::{start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame};
+pub use screencapturekit_capture::{
+    start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame,
+};
 pub use video_toolbox::{H264EncodedFrame, VideoEncoder};
 pub use video_toolbox_iosurface::{
-    is_available as iosurface_encoder_available, IOSurfaceEncoderError,
-    IOSurfaceVideoEncoder,
+    is_available as iosurface_encoder_available, IOSurfaceEncoderError, IOSurfaceVideoEncoder,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -136,9 +137,7 @@ fn finish_preview_request(
 }
 
 fn preview_from_capture_result(capture: Result<RgbaImage, String>) -> Option<String> {
-    capture
-        .ok()
-        .and_then(|rgba| preview_data_url(rgba).ok())
+    capture.ok().and_then(|rgba| preview_data_url(rgba).ok())
 }
 
 fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
@@ -156,12 +155,8 @@ fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
 
 fn preview_data_url(rgba: RgbaImage) -> Result<String, String> {
     let (width, height) = preview_dimensions(rgba.width(), rgba.height());
-    let thumbnail = image::imageops::resize(
-        &rgba,
-        width,
-        height,
-        image::imageops::FilterType::Triangle,
-    );
+    let thumbnail =
+        image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Triangle);
     let mut bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut bytes, PREVIEW_JPEG_QUALITY)
         .encode_image(&thumbnail)
@@ -195,10 +190,13 @@ fn capture_monitor_preview(
         return None;
     }
 
-    let capture = monitor.capture_image().map_err(|error| error.to_string()).and_then(|image| {
-        RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
-            .ok_or_else(|| "display preview has invalid image dimensions".into())
-    });
+    let capture = monitor
+        .capture_image()
+        .map_err(|error| error.to_string())
+        .and_then(|image| {
+            RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
+                .ok_or_else(|| "display preview has invalid image dimensions".into())
+        });
     if capture.is_err() {
         tracing::debug!(source_id, "could not capture display preview");
     }
@@ -215,9 +213,7 @@ fn legacy_capture_source_id(kind: &str, index: usize) -> String {
 }
 
 fn is_native_source_id(source_id: &str) -> bool {
-    !source_id.is_empty()
-        && !source_id.starts_with("screen:")
-        && !source_id.starts_with("window:")
+    !source_id.is_empty() && !source_id.starts_with("screen:") && !source_id.starts_with("window:")
 }
 
 /// Resolve a source against the stable native identifiers emitted during
@@ -329,7 +325,9 @@ pub fn get_capture_source_preview(
         let monitor = Monitor::all()
             .map_err(|error| error.to_string())?
             .into_iter()
-            .find(|monitor| monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
+            .find(|monitor| {
+                monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id)
+            });
         let Some(monitor) = monitor else {
             return Ok(None);
         };
@@ -406,8 +404,7 @@ fn resize_rgba_nearest(rgba: &RgbaImage, width: u32, height: u32) -> RgbaImage {
         for x in 0..width {
             let src_offset = src_row + (x_map[x as usize] as usize) * 4;
             let dst_offset = dst_row + (x as usize) * 4;
-            dst[dst_offset..dst_offset + 4]
-                .copy_from_slice(&src[src_offset..src_offset + 4]);
+            dst[dst_offset..dst_offset + 4].copy_from_slice(&src[src_offset..src_offset + 4]);
         }
     }
     RgbaImage::from_raw(width, height, dst).expect("nearest resize dimensions match buffer")
@@ -438,7 +435,7 @@ fn profile_max_dim(quality: f32) -> u32 {
         // motion. Ultra remains an explicit opt-in for devices that can
         // sustain larger frames.
         q if q >= 0.65 => 1920,
-        _ => 1920,
+        _ => 1280,
     }
 }
 
@@ -465,8 +462,8 @@ fn capture_bitrate_kbps(width: u32, height: u32, fps: u32, quality: f32) -> u32 
     let quality = quality.clamp(0.25, 1.0);
     // Screen text needs more bits than camera video. At quality=1 this is
     // about 3.7 Mbps for 1080p15, while retaining the existing frame rate.
-    let kbps = ((pixels as f64 * fps.max(1) as f64 * 12.0 * quality as f64) / 100_000.0)
-        .round() as u64;
+    let kbps =
+        ((pixels as f64 * fps.max(1) as f64 * 12.0 * quality as f64) / 100_000.0).round() as u64;
     kbps.clamp(1_200, 20_000) as u32
 }
 
@@ -491,7 +488,11 @@ fn captured_frame_from_screenkit(
     if width == 0 || height == 0 || stride < width.saturating_mul(4) {
         return Err("ScreenCaptureKit frame has invalid dimensions".into());
     }
-    if frame.bgra.as_ref().map_or(true, |bgra| bgra.len() < stride.saturating_mul(height)) {
+    if frame
+        .bgra
+        .as_ref()
+        .map_or(true, |bgra| bgra.len() < stride.saturating_mul(height))
+    {
         return Err("ScreenCaptureKit frame buffer is shorter than its stride".into());
     }
     let _ = quality;
@@ -683,9 +684,12 @@ pub fn spawn_video_capture_loop(
                 .rgba
                 .as_ref()
                 .map(|rgba| (rgba.width(), rgba.height()))
-                .or_else(|| frame.screenkit.as_ref().map(|native| {
-                    normalize_encoder_dimensions(native.width, native.height)
-                }))
+                .or_else(|| {
+                    frame
+                        .screenkit
+                        .as_ref()
+                        .map(|native| normalize_encoder_dimensions(native.width, native.height))
+                })
                 .unwrap_or((0, 0));
             let encode_started = std::time::Instant::now();
             let native_result = if let Some(native_frame) = frame.screenkit.take() {
@@ -706,7 +710,8 @@ pub fn spawn_video_capture_loop(
                             Ok(value) => iosurface_encoder = Some(value),
                             Err(error) => {
                                 tracing::warn!("native IOSurface encoder unavailable; falling back to FFmpeg: {error}");
-                                frame.rgba = screenkit_frame_to_rgba(&native_frame, target.quality).ok();
+                                frame.rgba =
+                                    screenkit_frame_to_rgba(&native_frame, target.quality).ok();
                                 iosurface_disabled = true;
                             }
                         }
@@ -716,7 +721,8 @@ pub fn spawn_video_capture_loop(
                             Ok(encoded) => Some(Ok(encoded)),
                             Err(error) => {
                                 tracing::warn!("native IOSurface encode failed; falling back to FFmpeg: {error}");
-                                frame.rgba = screenkit_frame_to_rgba(&native_frame, target.quality).ok();
+                                frame.rgba =
+                                    screenkit_frame_to_rgba(&native_frame, target.quality).ok();
                                 iosurface_encoder = None;
                                 iosurface_disabled = true;
                                 None
@@ -741,7 +747,9 @@ pub fn spawn_video_capture_loop(
                         Some(native) => match screenkit_frame_to_rgba(native, target.quality) {
                             Ok(rgba) => rgba,
                             Err(error) => {
-                                tracing::warn!("ScreenCaptureKit fallback conversion failed: {error}");
+                                tracing::warn!(
+                                    "ScreenCaptureKit fallback conversion failed: {error}"
+                                );
                                 continue;
                             }
                         },
@@ -752,20 +760,26 @@ pub fn spawn_video_capture_loop(
                     },
                 };
                 if encoder.is_none() {
-                let kbps = capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
-                match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
-                    Ok(value) => encoder = Some(value),
-                    Err(error) => {
-                        tracing::warn!("video encoder initialization failed: {error}");
-                        continue;
+                    let kbps =
+                        capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
+                    match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
+                        Ok(value) => encoder = Some(value),
+                        Err(error) => {
+                            tracing::warn!("video encoder initialization failed: {error}");
+                            continue;
+                        }
                     }
-                }
                 }
                 encoder.as_mut().unwrap().encode(rgba.as_raw())
             };
             let elapsed = encode_started.elapsed();
             if encoded_count < 3 || elapsed >= Duration::from_millis(100) {
-                tracing::info!("video encode dimensions={}x{} elapsed={:?}", dimensions.0, dimensions.1, elapsed);
+                tracing::info!(
+                    "video encode dimensions={}x{} elapsed={:?}",
+                    dimensions.0,
+                    dimensions.1,
+                    elapsed
+                );
             }
             match result {
                 Ok(mut encoded) => {
@@ -774,7 +788,9 @@ pub fn spawn_video_capture_loop(
                     // Native VideoToolbox may spend 300-400ms producing a frame on
                     // high-resolution displays. Keep that bounded-latency frame
                     // rather than starving the viewer after its first keyframe.
-                    if encoded.captured_at.elapsed() <= Duration::from_millis(500) || encoded.keyframe {
+                    if encoded.captured_at.elapsed() <= Duration::from_millis(500)
+                        || encoded.keyframe
+                    {
                         encoder_sink(encoded);
                     }
                 }
@@ -792,13 +808,15 @@ pub fn spawn_video_capture_loop(
         let cached_monitor = if matches!(target.kind, CaptureKind::Screen) {
             xcap::Monitor::all()
                 .map_err(|e| e.to_string())
-                .and_then(|monitors| select_source_by_id(
-                    monitors,
-                    target.source_id.as_deref(),
-                    target.id,
-                    "screen",
-                    |monitor| monitor.id(),
-                ))
+                .and_then(|monitors| {
+                    select_source_by_id(
+                        monitors,
+                        target.source_id.as_deref(),
+                        target.id,
+                        "screen",
+                        |monitor| monitor.id(),
+                    )
+                })
                 .ok()
         } else {
             None
@@ -892,9 +910,7 @@ pub fn spawn_video_capture_loop(
                     Err(ScreenKitError::Unavailable(_)) => {
                         screenkit_consecutive_timeouts =
                             next_screenkit_timeout_count(screenkit_consecutive_timeouts, true);
-                        if should_abandon_screenkit_after_timeouts(
-                            screenkit_consecutive_timeouts,
-                        ) {
+                        if should_abandon_screenkit_after_timeouts(screenkit_consecutive_timeouts) {
                             tracing::warn!(
                                 "ScreenCaptureKit timed out {} consecutive intervals; falling back to xcap",
                                 screenkit_consecutive_timeouts
@@ -955,7 +971,10 @@ pub fn spawn_video_capture_loop(
             };
             let capture_elapsed = capture_started.elapsed();
             if frames < 3 || capture_elapsed >= Duration::from_millis(100) {
-                tracing::info!("video capture: capture/resize elapsed={:?}", capture_elapsed);
+                tracing::info!(
+                    "video capture: capture/resize elapsed={:?}",
+                    capture_elapsed
+                );
             }
             match captured {
                 Ok(frame) => {
@@ -990,11 +1009,12 @@ pub struct CaptureHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_preview_request, capture_bitrate_kbps, finish_preview_request, legacy_capture_source_id,
-        normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions,
-        next_screenkit_timeout_count, profile_max_dim, profile_fps, preview_dimensions,
-        preview_from_capture_result, select_source_index, should_abandon_screenkit_after_timeouts,
-        store_preview_if_current, DisplayPreviewCache, PreviewCacheKey,
+        begin_preview_request, capture_bitrate_kbps, finish_preview_request,
+        legacy_capture_source_id, next_screenkit_timeout_count,
+        normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, preview_dimensions,
+        preview_from_capture_result, profile_fps, profile_max_dim, select_source_index,
+        should_abandon_screenkit_after_timeouts, store_preview_if_current, DisplayPreviewCache,
+        PreviewCacheKey,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use image::RgbaImage;
@@ -1018,7 +1038,7 @@ mod tests {
 
     #[test]
     fn quality_profiles_raise_resolution_progressively() {
-        assert_eq!(profile_max_dim(0.5), 1920);
+        assert_eq!(profile_max_dim(0.5), 1280);
         assert_eq!(profile_max_dim(0.75), 1920);
         assert_eq!(profile_max_dim(1.0), 3840);
     }
@@ -1033,7 +1053,9 @@ mod tests {
     #[test]
     fn screen_bitrate_scales_for_readable_text_without_lowering_fps() {
         assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) >= 3_500);
-        assert!(capture_bitrate_kbps(1920, 1080, 15, 1.0) > capture_bitrate_kbps(960, 540, 15, 1.0));
+        assert!(
+            capture_bitrate_kbps(1920, 1080, 15, 1.0) > capture_bitrate_kbps(960, 540, 15, 1.0)
+        );
     }
 
     #[test]
@@ -1043,65 +1065,40 @@ mod tests {
 
     #[test]
     fn source_id_selects_the_matching_native_source_before_the_legacy_index() {
-        let index = select_source_index(
-            &["41".into(), "99".into()],
-            Some("99"),
-            0,
-            "screen",
-        )
-        .expect("stable source id selects a source");
+        let index = select_source_index(&["41".into(), "99".into()], Some("99"), 0, "screen")
+            .expect("stable source id selects a source");
 
         assert_eq!(index, 1);
     }
 
     #[test]
     fn missing_source_id_falls_back_to_the_legacy_index() {
-        let index = select_source_index(
-            &["41".into(), "99".into()],
-            None,
-            1,
-            "screen",
-        )
-        .expect("legacy index selects a source");
+        let index = select_source_index(&["41".into(), "99".into()], None, 1, "screen")
+            .expect("legacy index selects a source");
 
         assert_eq!(index, 1);
     }
 
     #[test]
     fn empty_source_id_falls_back_to_the_legacy_index() {
-        let index = select_source_index(
-            &["41".into(), "99".into()],
-            Some(""),
-            1,
-            "screen",
-        )
-        .expect("empty source id falls back to its index");
+        let index = select_source_index(&["41".into(), "99".into()], Some(""), 1, "screen")
+            .expect("empty source id falls back to its index");
 
         assert_eq!(index, 1);
     }
 
     #[test]
     fn legacy_screen_source_id_falls_back_to_the_legacy_index() {
-        let index = select_source_index(
-            &["41".into(), "99".into()],
-            Some("screen:1"),
-            1,
-            "screen",
-        )
-        .expect("legacy source id falls back to its index");
+        let index = select_source_index(&["41".into(), "99".into()], Some("screen:1"), 1, "screen")
+            .expect("legacy source id falls back to its index");
 
         assert_eq!(index, 1);
     }
 
     #[test]
     fn legacy_window_source_id_falls_back_to_the_legacy_index() {
-        let index = select_source_index(
-            &["41".into(), "99".into()],
-            Some("window:0"),
-            1,
-            "window",
-        )
-        .expect("legacy source id falls back to its index");
+        let index = select_source_index(&["41".into(), "99".into()], Some("window:0"), 1, "window")
+            .expect("legacy source id falls back to its index");
 
         assert_eq!(index, 1);
     }

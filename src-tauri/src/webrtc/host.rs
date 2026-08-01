@@ -28,7 +28,10 @@ mod tests {
 
     #[test]
     fn keeps_stale_keyframe_for_stream_start_but_drops_stale_delta() {
-        assert!(!should_drop_encoded_frame(Duration::from_millis(500), false));
+        assert!(!should_drop_encoded_frame(
+            Duration::from_millis(500),
+            false
+        ));
         assert!(should_drop_encoded_frame(Duration::from_millis(600), false));
         assert!(!should_drop_encoded_frame(Duration::from_millis(600), true));
         assert!(!should_drop_encoded_frame(Duration::from_millis(50), false));
@@ -39,12 +42,7 @@ mod tests {
         let plan = plan_target_switch(Some("screen-a"), false, "screen-b", |_| Ok(()))
             .expect("a pending target does not need capture validation");
 
-        assert_eq!(
-            plan,
-            TargetSwitchPlan::UpdatePending {
-                target: "screen-b"
-            }
-        );
+        assert_eq!(plan, TargetSwitchPlan::UpdatePending { target: "screen-b" });
     }
 
     #[test]
@@ -91,7 +89,10 @@ mod tests {
     #[test]
     fn pending_keyframe_is_not_replaced_by_a_delta_frame() {
         assert_eq!(queue_admission(true, false), QueueAdmission::KeepExisting);
-        assert_eq!(queue_admission(false, true), QueueAdmission::ReplaceExisting);
+        assert_eq!(
+            queue_admission(false, true),
+            QueueAdmission::ReplaceExisting
+        );
     }
 
     #[test]
@@ -147,7 +148,10 @@ mod tests {
         let queued = dequeue_queued_frame(&frame_rx).expect("queued frame is available");
 
         assert_eq!(queued.generation, 1);
-        assert!(frame_rx.try_lock().is_some(), "dequeue releases the receiver mutex");
+        assert!(
+            frame_rx.try_lock().is_some(),
+            "dequeue releases the receiver mutex"
+        );
     }
 
     #[test]
@@ -158,9 +162,13 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
         let stop_thread = thread::spawn(move || {
-            started_tx.send(()).expect("test receiver remains available");
+            started_tx
+                .send(())
+                .expect("test receiver remains available");
             peer_for_stop.stop();
-            finished_tx.send(()).expect("test receiver remains available");
+            finished_tx
+                .send(())
+                .expect("test receiver remains available");
         });
 
         started_rx.recv().expect("stop thread starts");
@@ -248,7 +256,9 @@ fn require_expected_generation(current: u64, expected: u64) -> Result<(), String
     if current == expected {
         Ok(())
     } else {
-        Err(format!("capture generation changed from {expected} to {current}"))
+        Err(format!(
+            "capture generation changed from {expected} to {current}"
+        ))
     }
 }
 
@@ -305,7 +315,9 @@ impl CandidateCapture {
     }
 
     fn take_handle(&mut self) -> crate::webrtc::CaptureHandle {
-        self.handle.take().expect("prepared capture handle is present")
+        self.handle
+            .take()
+            .expect("prepared capture handle is present")
     }
 }
 
@@ -492,17 +504,19 @@ impl HostPeer {
         })?;
 
         match plan {
-            TargetSwitchPlan::UpdatePending { target }
-                if self.video_mid.lock().is_none() => Ok(PreparedTargetSwitch {
+            TargetSwitchPlan::UpdatePending { target } if self.video_mid.lock().is_none() => {
+                Ok(PreparedTargetSwitch {
                     target,
                     fps,
                     expected_generation: self.capture_generation.load(Ordering::SeqCst),
                     candidate: None,
-                }),
+                })
+            }
             TargetSwitchPlan::UpdatePending { target }
             | TargetSwitchPlan::RestartCapture { target, .. } => {
                 let expected_generation = self.capture_generation.load(Ordering::SeqCst);
-                let candidate = self.start_candidate_capture(target.clone(), fps, expected_generation + 1)?;
+                let candidate =
+                    self.start_candidate_capture(target.clone(), fps, expected_generation + 1)?;
                 Ok(PreparedTargetSwitch {
                     target,
                     fps,
@@ -697,9 +711,7 @@ impl HostPeer {
                             break;
                         }
                         Ok(Output::Transmit(packet)) => {
-                            if let Err(err) =
-                                socket.send_to(&packet.contents, packet.destination)
-                            {
+                            if let Err(err) = socket.send_to(&packet.contents, packet.destination) {
                                 tracing::warn!(
                                     "host: socket send failed ({} bytes -> {}): {err}",
                                     packet.contents.len(),
@@ -756,12 +768,10 @@ impl HostPeer {
                                 // every configured PT (opus, vp8, vp9, h264, ...) so we
                                 // can't just take .first(); the first one is opus PT 111
                                 // by default, which would silently drop every H.264 frame.
-                                let h264_pt = writer.payload_params().iter().find(|p| {
-                                    matches!(
-                                        p.spec().codec,
-                                        str0m::format::Codec::H264
-                                    )
-                                });
+                                let h264_pt = writer
+                                    .payload_params()
+                                    .iter()
+                                    .find(|p| matches!(p.spec().codec, str0m::format::Codec::H264));
                                 let pt = match h264_pt {
                                     Some(p) => p.pt(),
                                     None => {
@@ -808,17 +818,13 @@ impl HostPeer {
                                     };
                                     match drained {
                                         Ok(Output::Transmit(packet)) => {
-                                            let _ = socket.send_to(
-                                                &packet.contents,
-                                                packet.destination,
-                                            );
+                                            let _ = socket
+                                                .send_to(&packet.contents, packet.destination);
                                         }
                                         Ok(Output::Timeout(_)) => break,
                                         Ok(Output::Event(_)) => {}
                                         Err(error) => {
-                                            tracing::warn!(
-                                                "host: post-write poll error: {error}"
-                                            );
+                                            tracing::warn!("host: post-write poll error: {error}");
                                             break;
                                         }
                                     }

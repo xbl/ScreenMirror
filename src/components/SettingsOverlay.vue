@@ -81,6 +81,17 @@ onMounted(async () => {
 async function checkPermission() {
   try {
     permissionGranted.value = await api.checkScreenRecordingPermission();
+    if (!permissionGranted.value) {
+      // Some macOS development builds report a stale preflight result even
+      // though the capture APIs are usable. Treat successful enumeration as
+      // the authoritative runtime check.
+      try {
+        await api.enumerateCaptureSources();
+        permissionGranted.value = true;
+      } catch {
+        // Keep the preflight result when enumeration is unavailable.
+      }
+    }
   } catch {
     permissionGranted.value = false;
   }

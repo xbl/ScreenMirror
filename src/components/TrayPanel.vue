@@ -26,12 +26,9 @@
     <SourcePicker class="tray-source" external-chooser />
 
     <section class="tray-controls" aria-label="Share controls">
-      <StartButton
-        v-model:sharing="sharing"
-        v-model:viewerCount="viewerCount"
-      />
       <div class="tray-actions">
         <button class="tray-action tray-exit" type="button" @click="exitApp">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M13 8l4 4-4 4M9 12h8" /></svg>
           <span>{{ t('app.exit') }}</span>
         </button>
       </div>
@@ -56,7 +53,6 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QRCard from './QRCard.vue';
 import SourcePicker from './SourcePicker.vue';
-import StartButton from './StartButton.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
 import { api } from '../utils/api';
@@ -64,21 +60,18 @@ import { api } from '../utils/api';
 const { t } = useI18n();
 const showDevices = ref(false);
 const showSettings = ref(false);
-const sharing = ref(false);
 const viewerCount = ref(0);
 let poll: number | undefined;
 
 async function refreshState() {
   try {
     viewerCount.value = (await api.getConnectedDevices()).length;
-    if (viewerCount.value > 0) sharing.value = true;
   } catch {
     /* tolerate startup races while the host server comes up */
   }
 }
 
 async function onReset() {
-  sharing.value = false;
   viewerCount.value = 0;
 }
 
@@ -242,8 +235,14 @@ onBeforeUnmount(() => {
 }
 
 .tray-exit {
+  justify-content: center;
+  gap: 8px;
   color: var(--danger, #d86b6b);
+  border: 1px solid color-mix(in srgb, var(--danger, #d86b6b) 45%, transparent);
+  background: color-mix(in srgb, var(--danger, #d86b6b) 10%, var(--surface-2));
 }
+
+.tray-exit svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 
 .tray-action {
   display: flex;
@@ -264,6 +263,8 @@ onBeforeUnmount(() => {
   color: var(--text-strong);
   border-color: var(--accent);
 }
+
+.tray-exit:hover { color: #fff; border-color: var(--danger, #d86b6b); background: var(--danger, #d86b6b); }
 
 .tray-permission {
   display: flex;

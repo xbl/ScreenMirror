@@ -1,4 +1,6 @@
-use screenmirror_lib::permissions::{check_screen_recording_permission, request_screen_recording_permission};
+use screenmirror_lib::permissions::{
+    check_screen_recording_permission, request_screen_recording_permission,
+};
 
 #[cfg(not(target_os = "macos"))]
 use screenmirror_lib::permissions::open_screen_recording_settings;
@@ -21,6 +23,9 @@ fn open_settings_returns_result_unit() {
     #[cfg(not(target_os = "macos"))]
     {
         let r = open_screen_recording_settings();
-        assert!(r.is_ok(), "open_screen_recording_settings must Ok on non-macOS");
+        assert!(
+            r.is_ok(),
+            "open_screen_recording_settings must Ok on non-macOS"
+        );
     }
 }

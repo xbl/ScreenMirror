@@ -59,9 +59,7 @@ fn av_err(code: c_int) -> String {
         return "EAGAIN".into();
     }
     let mut buf = [0u8; 256];
-    let n = unsafe {
-        av::av_strerror(code, buf.as_mut_ptr() as *mut c_char, buf.len())
-    };
+    let n = unsafe { av::av_strerror(code, buf.as_mut_ptr() as *mut c_char, buf.len()) };
     if n >= 0 {
         let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
         String::from_utf8_lossy(&buf[..len]).into_owned()
@@ -85,10 +83,7 @@ impl NativeVideoEncoder {
         // Checked arithmetic for buffer sizes (RGBA = 4 bytes/pixel,
         // YUV420P = 3/2 bytes/pixel). Reject overflow up-front rather
         // than panicking inside `vec![0u8; ...]`.
-        let rgba_len = match width
-            .checked_mul(height)
-            .and_then(|p| p.checked_mul(4))
-        {
+        let rgba_len = match width.checked_mul(height).and_then(|p| p.checked_mul(4)) {
             Some(n) => n as usize,
             None => return Err(format!("RGBA buffer size overflow for {width}x{height}")),
         };
@@ -124,10 +119,7 @@ impl NativeVideoEncoder {
                 num: 1,
                 den: fps_c * 1000,
             };
-            (*ctx).framerate = av::AVRational {
-                num: fps_c,
-                den: 1,
-            };
+            (*ctx).framerate = av::AVRational { num: fps_c, den: 1 };
             (*ctx).gop_size = fps_c * 2;
             (*ctx).max_b_frames = 0;
             (*ctx).delay = 0;
@@ -278,7 +270,10 @@ impl NativeVideoEncoder {
     pub fn encode(&mut self, rgba: &[u8]) -> Result<H264EncodedFrame, String> {
         let expected = (self.width as usize) * (self.height as usize) * 4;
         if rgba.len() != expected {
-            return Err(format!("expected {expected} RGBA bytes, got {}", rgba.len()));
+            return Err(format!(
+                "expected {expected} RGBA bytes, got {}",
+                rgba.len()
+            ));
         }
         self.buf_rgba.copy_from_slice(rgba);
 
@@ -467,12 +462,15 @@ mod tests {
                     1 => {
                         let cx = w as i32 / 2;
                         let cy = h as i32 / 2;
-                        let d = (((x as i32 - cx).abs()
-                            + (y as i32 - cy).abs()) as u8)
-                            .wrapping_mul(2);
+                        let d =
+                            (((x as i32 - cx).abs() + (y as i32 - cy).abs()) as u8).wrapping_mul(2);
                         (d, d, 255 - d)
                     }
-                    _ => ((x ^ (y << 1)) as u8, (y ^ x) as u8, (x.wrapping_mul(3) ^ y) as u8),
+                    _ => (
+                        (x ^ (y << 1)) as u8,
+                        (y ^ x) as u8,
+                        (x.wrapping_mul(3) ^ y) as u8,
+                    ),
                 };
                 buf[i] = r;
                 buf[i + 1] = g;

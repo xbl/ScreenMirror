@@ -6,7 +6,10 @@
 //! exposing platform-specific types across the rest of the crate.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::{Duration, Instant};
 
 use super::CaptureTarget;
@@ -50,10 +53,7 @@ pub struct ScreenKitCapture {
 
 impl ScreenKitCapture {
     #[allow(dead_code)]
-    pub(crate) fn from_parts(
-        frames: Receiver<ScreenKitFrame>,
-        stopped: Arc<AtomicBool>,
-    ) -> Self {
+    pub(crate) fn from_parts(frames: Receiver<ScreenKitFrame>, stopped: Arc<AtomicBool>) -> Self {
         Self {
             frames: Arc::new(Mutex::new(frames)),
             stopped,
@@ -80,9 +80,9 @@ impl ScreenKitCapture {
         let frames = self.frames.lock().map_err(|_| ScreenKitError::Stopped)?;
         match frames.try_recv() {
             Ok(frame) => Ok(frame),
-            Err(TryRecvError::Empty) => Err(ScreenKitError::Unavailable(
-                "no frame available".into(),
-            )),
+            Err(TryRecvError::Empty) => {
+                Err(ScreenKitError::Unavailable("no frame available".into()))
+            }
             Err(TryRecvError::Disconnected) => Err(ScreenKitError::Stopped),
         }
     }
@@ -161,7 +161,8 @@ pub fn start_screen_capture(
     let stopped_for_handler = stopped.clone();
     let handler = move |sample: screencapturekit::cm::CMSampleBuffer,
                         output_type: SCStreamOutputType| {
-        if output_type != SCStreamOutputType::Screen || stopped_for_handler.load(Ordering::Acquire) {
+        if output_type != SCStreamOutputType::Screen || stopped_for_handler.load(Ordering::Acquire)
+        {
             return;
         }
         if let Some(status) = sample.frame_status() {
@@ -201,7 +202,9 @@ pub fn start_screen_capture(
             height: height as u32,
             bytes_per_row: row_bytes as u32,
             bgra: Some(bgra),
-            iosurface: pixel_buffer.io_surface().map(|surface| surface.as_ptr() as usize),
+            iosurface: pixel_buffer
+                .io_surface()
+                .map(|surface| surface.as_ptr() as usize),
             // `display_time` is a mach-absolute timestamp; Instant::now() is
             // monotonic and is the timestamp consumed by the existing encoder age gate.
             captured_at: Instant::now(),

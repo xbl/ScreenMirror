@@ -6,17 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Runtime};
 
-#[cfg(target_os = "macos")]
-fn tray_template_icon(icon: &tauri::image::Image<'_>) -> tauri::image::Image<'static> {
-    let mut rgba = icon.rgba().to_vec();
-    for pixel in rgba.chunks_exact_mut(4) {
-        pixel[0] = 255;
-        pixel[1] = 255;
-        pixel[2] = 255;
-    }
-    tauri::image::Image::new_owned(rgba, icon.width(), icon.height())
-}
-
 static LAST_TRAY_CLICK: std::sync::OnceLock<Mutex<Option<Instant>>> = std::sync::OnceLock::new();
 
 fn position_tray_panel(
@@ -83,6 +72,7 @@ fn accept_tray_click() -> bool {
 }
 
 pub mod commands;
+pub mod icons;
 pub mod network;
 pub mod permissions;
 pub mod signaling;
@@ -217,10 +207,9 @@ pub fn run() {
             // menu next to that window.
             let handle = app.handle().clone();
             if let Some(icon) = app.default_window_icon().cloned() {
-                #[cfg(target_os = "macos")]
-                let icon = tray_template_icon(&icon);
                 let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
                     .icon(icon)
+                    .icon_as_template(true)
                     .tooltip("Screenmirror")
                     .on_tray_icon_event(|tray, event| {
                         use tauri::tray::TrayIconEvent;

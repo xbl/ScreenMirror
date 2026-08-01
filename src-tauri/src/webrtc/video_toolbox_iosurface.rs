@@ -40,7 +40,12 @@ mod native {
     }
 
     impl Encoder {
-        pub fn new(width: u32, height: u32, fps: u32, bitrate_kbps: u32) -> Result<Self, IOSurfaceEncoderError> {
+        pub fn new(
+            width: u32,
+            height: u32,
+            fps: u32,
+            bitrate_kbps: u32,
+        ) -> Result<Self, IOSurfaceEncoderError> {
             if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
                 return Err(IOSurfaceEncoderError::InvalidDimensions(width, height));
             }
@@ -59,29 +64,63 @@ mod native {
                 4,
             )
             .ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface::create failed".into()))?;
-            Ok(Self { width, height, fps: fps.max(1), session, surface, pts: 0, sps_pps: Vec::new() })
+            Ok(Self {
+                width,
+                height,
+                fps: fps.max(1),
+                session,
+                surface,
+                pts: 0,
+                sps_pps: Vec::new(),
+            })
         }
 
-        pub fn encode(&mut self, frame: &ScreenKitFrame) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
-            let bgra = frame.bgra.as_deref().ok_or(IOSurfaceEncoderError::MissingFrameData)?;
+        pub fn encode(
+            &mut self,
+            frame: &ScreenKitFrame,
+        ) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
+            let bgra = frame
+                .bgra
+                .as_deref()
+                .ok_or(IOSurfaceEncoderError::MissingFrameData)?;
             let expected_row = self.width as usize * 4;
-            if frame.width != self.width || frame.height != self.height || frame.bytes_per_row < expected_row as u32 {
-                return Err(IOSurfaceEncoderError::Native(format!("frame dimensions {}x{} do not match encoder {}x{}", frame.width, frame.height, self.width, self.height)));
+            if frame.width != self.width
+                || frame.height != self.height
+                || frame.bytes_per_row < expected_row as u32
+            {
+                return Err(IOSurfaceEncoderError::Native(format!(
+                    "frame dimensions {}x{} do not match encoder {}x{}",
+                    frame.width, frame.height, self.width, self.height
+                )));
             }
-            let mut guard = self.surface.lock(IOSurfaceLockOptions::from_bits(0)).map_err(|e| IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}")))?;
+            let mut guard = self
+                .surface
+                .lock(IOSurfaceLockOptions::from_bits(0))
+                .map_err(|e| {
+                    IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}"))
+                })?;
             let dst_stride = guard.bytes_per_row();
-            let dst = guard.as_slice_mut().ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface is not writable".into()))?;
+            let dst = guard
+                .as_slice_mut()
+                .ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface is not writable".into()))?;
             let src_stride = frame.bytes_per_row as usize;
             for row in 0..self.height as usize {
                 let src_start = row * src_stride;
                 let dst_start = row * dst_stride;
                 let src_end = src_start + expected_row;
                 let dst_end = dst_start + expected_row;
-                if src_end > bgra.len() || dst_end > dst.len() { return Err(IOSurfaceEncoderError::Native("BGRA frame buffer is truncated".into())); }
+                if src_end > bgra.len() || dst_end > dst.len() {
+                    return Err(IOSurfaceEncoderError::Native(
+                        "BGRA frame buffer is truncated".into(),
+                    ));
+                }
                 dst[dst_start..dst_end].copy_from_slice(&bgra[src_start..src_end]);
             }
             drop(guard);
-            let encoded = self.session.encode(&self.surface, (self.pts, self.fps as i32)).map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
+            let encoded = self
+                .session
+                .encode(&self.surface, (self.pts, self.fps as i32))
+                .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
             self.pts = self.pts.saturating_add(1);
             if self.sps_pps.is_empty() {
                 if let Some(sample) = encoded.cm_sample_buffer() {
@@ -94,16 +133,25 @@ mod native {
                             let mut header = 0;
                             let status = unsafe {
                                 apple_cf::raw::CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                                    format.as_ptr().cast(), index, &mut pointer, &mut size, &mut count, &mut header,
+                                    format.as_ptr().cast(),
+                                    index,
+                                    &mut pointer,
+                                    &mut size,
+                                    &mut count,
+                                    &mut header,
                                 )
                             };
                             if status != 0 || pointer.is_null() || size == 0 {
                                 break;
                             }
                             self.sps_pps.extend_from_slice(&[0, 0, 0, 1]);
-                            self.sps_pps.extend_from_slice(unsafe { std::slice::from_raw_parts(pointer, size) });
+                            self.sps_pps.extend_from_slice(unsafe {
+                                std::slice::from_raw_parts(pointer, size)
+                            });
                             index += 1;
-                            if index >= count { break; }
+                            if index >= count {
+                                break;
+                            }
                         }
                     }
                 }
@@ -119,22 +167,34 @@ mod native {
                     .any(|nal| nal.first().map(|byte| byte & 0x1f) == Some(8));
                 if !has_sps || !has_pps {
                     if self.sps_pps.is_empty() {
-                        return Err(IOSurfaceEncoderError::Native("VideoToolbox format description has no SPS/PPS".into()));
+                        return Err(IOSurfaceEncoderError::Native(
+                            "VideoToolbox format description has no SPS/PPS".into(),
+                        ));
                     }
                     let mut with_params = self.sps_pps.clone();
                     with_params.extend_from_slice(&data);
                     data = with_params;
                 }
             }
-            Ok(H264EncodedFrame { data, keyframe, captured_at: frame.captured_at })
+            Ok(H264EncodedFrame {
+                data,
+                keyframe,
+                captured_at: frame.captured_at,
+            })
         }
 
-        pub fn flush(&mut self) -> Result<(), IOSurfaceEncoderError> { Ok(()) }
-        pub fn dimensions(&self) -> (u32, u32) { (self.width, self.height) }
+        pub fn flush(&mut self) -> Result<(), IOSurfaceEncoderError> {
+            Ok(())
+        }
+        pub fn dimensions(&self) -> (u32, u32) {
+            (self.width, self.height)
+        }
     }
 
     #[allow(dead_code)]
-    pub fn available() -> bool { true }
+    pub fn available() -> bool {
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -146,35 +206,62 @@ pub struct IOSurfaceVideoEncoder {
 }
 
 impl IOSurfaceVideoEncoder {
-    pub fn new(width: u32, height: u32, fps: u32, bitrate_kbps: u32) -> Result<Self, IOSurfaceEncoderError> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate_kbps: u32,
+    ) -> Result<Self, IOSurfaceEncoderError> {
         if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
             return Err(IOSurfaceEncoderError::InvalidDimensions(width, height));
         }
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        { return native::Encoder::new(width, height, fps, bitrate_kbps).map(|inner| Self { inner }); }
+        {
+            return native::Encoder::new(width, height, fps, bitrate_kbps)
+                .map(|inner| Self { inner });
+        }
         #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
-        { let _ = (fps, bitrate_kbps); Err(IOSurfaceEncoderError::Unsupported) }
+        {
+            let _ = (fps, bitrate_kbps);
+            Err(IOSurfaceEncoderError::Unsupported)
+        }
     }
 
-    pub fn encode(&mut self, frame: &ScreenKitFrame) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
+    pub fn encode(
+        &mut self,
+        frame: &ScreenKitFrame,
+    ) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        { self.inner.encode(frame) }
+        {
+            self.inner.encode(frame)
+        }
         #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
-        { let _ = frame; Err(IOSurfaceEncoderError::Unsupported) }
+        {
+            let _ = frame;
+            Err(IOSurfaceEncoderError::Unsupported)
+        }
     }
 
     pub fn flush(&mut self) -> Result<(), IOSurfaceEncoderError> {
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        { self.inner.flush() }
+        {
+            self.inner.flush()
+        }
         #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
-        { Err(IOSurfaceEncoderError::Unsupported) }
+        {
+            Err(IOSurfaceEncoderError::Unsupported)
+        }
     }
 
     pub fn dimensions(&self) -> (u32, u32) {
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        { self.inner.dimensions() }
+        {
+            self.inner.dimensions()
+        }
         #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
-        { self.dimensions }
+        {
+            self.dimensions
+        }
     }
 }
 
