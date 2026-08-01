@@ -35,6 +35,7 @@ export default {
     errorPermission: 'Screen Recording permission is required to load sources.',
     errorEnumerate: 'Could not load available sources. Please try again.',
     errorSwitch: 'Could not switch to this source. Your current share is unchanged.',
+    errorSourceGone: 'The current source is no longer available. Your share is unchanged.',
   },
   start: {
     idle: 'Start sharing',

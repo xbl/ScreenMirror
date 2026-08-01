@@ -20,10 +20,10 @@
               v-for="item in group.items"
               :key="item.sourceId"
               class="sp-source"
-              :class="{ selected: item.sourceId === selectedSourceId }"
+              :class="{ selected: item.sourceId === selectedSource?.sourceId }"
               type="button"
               :data-source-id="item.sourceId"
-              :aria-pressed="item.sourceId === selectedSourceId"
+              :aria-pressed="item.sourceId === selectedSource?.sourceId"
               @click="selectSource(item)"
             >
               <span class="sp-thumb" aria-hidden="true">
@@ -78,7 +78,7 @@ type Quality = 'balanced' | 'high' | 'ultra';
 
 const { t } = useI18n();
 const sources = ref<CaptureSourceInfo[]>([]);
-const selectedSourceId = ref<string | null>(null);
+const selectedSource = ref<CaptureSourceInfo | null>(null);
 const quality = ref<Quality>('high');
 const error = ref('');
 const loading = ref(false);
@@ -105,10 +105,6 @@ const sourceGroups = computed(() => [
     items: sources.value.filter((source) => source.kind === 'screen' && !source.isPrimary),
   },
 ].filter((group) => group.items.length > 0));
-
-const selectedSource = computed(
-  () => sources.value.find((source) => source.sourceId === selectedSourceId.value) ?? null,
-);
 
 function qualityValue(value: Quality) {
   return { balanced: 0.5, high: 0.75, ultra: 1.0 }[value];
@@ -148,7 +144,7 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
 
   try {
     await api.setCaptureTarget(captureTarget(source, nextQuality));
-    selectedSourceId.value = source.sourceId;
+    selectedSource.value = source;
     quality.value = nextQuality;
     return true;
   } catch {
@@ -166,7 +162,12 @@ async function refreshSources() {
     const available = await api.enumerateCaptureSources();
     sources.value = available;
 
-    if (selectedSourceId.value && available.some((source) => source.sourceId === selectedSourceId.value)) {
+    if (selectedSource.value) {
+      const refreshedSelection = available.find(
+        (source) => source.sourceId === selectedSource.value?.sourceId,
+      );
+      if (refreshedSelection) selectedSource.value = refreshedSelection;
+      else error.value = t('source.errorSourceGone');
       return;
     }
 

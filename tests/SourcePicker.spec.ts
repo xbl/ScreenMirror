@@ -69,6 +69,7 @@ const i18n = createI18n({
         errorPermission: 'Screen Recording permission is required.',
         errorEnumerate: 'Could not load available sources.',
         errorSwitch: 'Could not switch to this source.',
+        errorSourceGone: 'The current source is no longer available. Your share is unchanged.',
       },
     },
   },
@@ -158,5 +159,19 @@ describe('SourcePicker', () => {
 
     expect(wrapper.find('[data-source-id="main-display"]').classes()).toContain('selected');
     expect(wrapper.text()).toContain('Screen Recording permission is required.');
+  });
+
+  it('keeps the active source when it disappears during a successful refresh', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+    apiMocks.setCaptureTarget.mockClear();
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce(sources.slice(1));
+
+    await wrapper.get('.sp-refresh').trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.setCaptureTarget).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="source-preview"]').text()).toContain('Built-in Retina Display');
+    expect(wrapper.text()).toContain('The current source is no longer available.');
   });
 });

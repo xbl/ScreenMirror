@@ -35,6 +35,7 @@ export default {
     errorPermission: '需要屏幕录制权限才能载入分享来源。',
     errorEnumerate: '无法载入可分享的来源，请重试。',
     errorSwitch: '无法切换到此来源，当前分享保持不变。',
+    errorSourceGone: '当前分享来源已不可用，当前分享保持不变。',
   },
   start: {
     idle: '开始分享',
