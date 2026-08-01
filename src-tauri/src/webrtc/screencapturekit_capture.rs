@@ -123,10 +123,14 @@ pub fn start_screen_capture(
     let content = SCShareableContent::get()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
     let displays = content.displays();
-    let display = if let Some(source_id) = target.source_id.as_deref() {
+    let display = if let Some(source_id) = target
+        .source_id
+        .as_deref()
+        .filter(|source_id| super::is_native_source_id(source_id))
+    {
         displays
             .iter()
-            .find(|display| source_id == format!("screen:{}", display.display_id()))
+            .find(|display| source_id == display.display_id().to_string())
             .ok_or_else(|| ScreenKitError::Unavailable(format!("display source {source_id} is no longer available")))?
     } else {
         displays

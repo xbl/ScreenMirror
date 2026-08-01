@@ -46,7 +46,7 @@ pub struct CaptureTarget {
 pub struct CaptureSourceInfo {
     /// Legacy index-based identifier (for example, `screen:0`).
     pub id: String,
-    /// Stable native identifier (for example, `screen:69733440`).
+    /// Stable native identifier (for example, `69733440`).
     pub source_id: String,
     pub name: String,
     pub kind: String,
@@ -59,6 +59,12 @@ pub struct CaptureSourceInfo {
 
 fn legacy_capture_source_id(kind: &str, index: usize) -> String {
     format!("{kind}:{index}")
+}
+
+fn is_native_source_id(source_id: &str) -> bool {
+    !source_id.is_empty()
+        && !source_id.starts_with("screen:")
+        && !source_id.starts_with("window:")
 }
 
 /// Enumerate available capture sources (monitors + windows).
@@ -74,7 +80,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
         {
             out.push(CaptureSourceInfo {
                 id: legacy_capture_source_id("screen", idx),
-                source_id: format!("screen:{}", m.id().unwrap_or(idx as u32)),
+                source_id: m.id().map(|id| id.to_string()).unwrap_or_default(),
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
                 is_primary: m.is_primary().unwrap_or(false),
@@ -91,7 +97,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 }
                 out.push(CaptureSourceInfo {
                     id: legacy_capture_source_id("window", idx),
-                    source_id: format!("window:{}", w.id().unwrap_or(idx as u32)),
+                    source_id: w.id().map(|id| id.to_string()).unwrap_or_default(),
                     name,
                     kind: "window".into(),
                     is_primary: false,
@@ -117,10 +123,10 @@ fn select_source_by_id<T>(
     kind: &str,
     id: impl Fn(&T) -> Result<u32, xcap::XCapError>,
 ) -> Result<T, String> {
-    if let Some(source_id) = source_id {
+    if let Some(source_id) = source_id.filter(|id| is_native_source_id(id)) {
         return sources
             .into_iter()
-            .find(|source| id(source).ok().is_some_and(|native_id| source_id == format!("{kind}:{native_id}")))
+            .find(|source| id(source).ok().is_some_and(|native_id| source_id == native_id.to_string()))
             .ok_or_else(|| format!("{kind} source {source_id} is no longer available"));
     }
     sources
@@ -728,7 +734,7 @@ mod tests {
     fn source_id_selects_the_matching_native_source_before_the_legacy_index() {
         let source = select_source_by_id(
             vec![41_u32, 99_u32],
-            Some("screen:99"),
+            Some("99"),
             0,
             "screen",
             |id| Ok(*id),
@@ -749,6 +755,36 @@ mod tests {
             |id| Ok(*id),
         )
         .expect("legacy index selects a source");
+
+        assert_eq!(source, 99);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn empty_source_id_falls_back_to_the_legacy_index() {
+        let source = select_source_by_id(
+            vec![41_u32, 99_u32],
+            Some(""),
+            1,
+            "screen",
+            |id| Ok(*id),
+        )
+        .expect("empty source id falls back to its index");
+
+        assert_eq!(source, 99);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn legacy_screen_source_id_falls_back_to_the_legacy_index() {
+        let source = select_source_by_id(
+            vec![41_u32, 99_u32],
+            Some("screen:1"),
+            1,
+            "screen",
+            |id| Ok(*id),
+        )
+        .expect("legacy source id falls back to its index");
 
         assert_eq!(source, 99);
     }

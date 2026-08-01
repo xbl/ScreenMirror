@@ -6,19 +6,19 @@ fn capture_target_clones_its_optional_stable_source_id() {
     let target = CaptureTarget {
         kind: CaptureKind::Screen,
         id: 3,
-        source_id: Some("screen:69733440".into()),
+        source_id: Some("69733440".into()),
         quality: 0.75,
     };
 
     let cloned = target.clone();
-    assert_eq!(cloned.source_id.as_deref(), Some("screen:69733440"));
+    assert_eq!(cloned.source_id.as_deref(), Some("69733440"));
 }
 
 #[test]
 fn capture_source_info_serializes_the_source_identifier() {
     let source = CaptureSourceInfo {
         id: "screen:0".into(),
-        source_id: "screen:69733440".into(),
+        source_id: "69733440".into(),
         name: "Studio Display".into(),
         kind: "screen".into(),
         is_primary: true,
@@ -29,7 +29,7 @@ fn capture_source_info_serializes_the_source_identifier() {
 
     let value = serde_json::to_value(source).expect("capture source serializes");
     assert_eq!(value["id"], "screen:0");
-    assert_eq!(value["sourceId"], "screen:69733440");
+    assert_eq!(value["sourceId"], "69733440");
     assert_eq!(value["kind"], "screen");
     assert_eq!(value["isPrimary"], true);
     assert!(value["preview"].is_null());
@@ -40,11 +40,11 @@ fn capture_target_args_accepts_the_frontend_source_id_name() {
     let args: CaptureTargetArgs = serde_json::from_value(serde_json::json!({
         "kind": "screen",
         "id": 0,
-        "sourceId": "screen:69733440"
+        "sourceId": "69733440"
     }))
     .expect("camelCase command arguments deserialize");
 
-    assert_eq!(args.source_id.as_deref(), Some("screen:69733440"));
+    assert_eq!(args.source_id.as_deref(), Some("69733440"));
 }
 
 #[cfg(not(target_os = "macos"))]
