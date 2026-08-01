@@ -496,6 +496,10 @@
 #![allow(clippy::bool_to_int_with_if)]
 #![allow(clippy::assertions_on_constants)]
 #![allow(clippy::manual_range_contains)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_parens)]
+#![allow(dead_code)]
+#![allow(mismatched_lifetime_syntaxes)]
 #![deny(missing_docs)]
 
 #[macro_use]

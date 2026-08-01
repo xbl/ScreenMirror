@@ -56,7 +56,6 @@ async function openSettings(): Promise<void> {
   try {
     await api.openScreenRecordingSettings();
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error('failed to open System Settings:', e);
   } finally {
     opening.value = false;

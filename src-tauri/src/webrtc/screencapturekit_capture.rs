@@ -49,6 +49,7 @@ pub struct ScreenKitCapture {
 }
 
 impl ScreenKitCapture {
+    #[allow(dead_code)]
     pub(crate) fn from_parts(
         frames: Receiver<ScreenKitFrame>,
         stopped: Arc<AtomicBool>,

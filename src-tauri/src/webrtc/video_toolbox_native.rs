@@ -211,7 +211,7 @@ impl NativeVideoEncoder {
 
             let sps_pps = extract_sps_pps(ctx);
 
-            let mut enc = Self {
+            let enc = Self {
                 width,
                 height,
                 fps,

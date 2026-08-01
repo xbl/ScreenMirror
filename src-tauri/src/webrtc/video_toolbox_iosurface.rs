@@ -133,6 +133,7 @@ mod native {
         pub fn dimensions(&self) -> (u32, u32) { (self.width, self.height) }
     }
 
+    #[allow(dead_code)]
     pub fn available() -> bool { true }
 }
 

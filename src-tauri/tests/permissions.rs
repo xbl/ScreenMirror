@@ -1,7 +1,7 @@
-use screenmirror_lib::permissions::{
-    check_screen_recording_permission, open_screen_recording_settings,
-    request_screen_recording_permission,
-};
+use screenmirror_lib::permissions::{check_screen_recording_permission, request_screen_recording_permission};
+
+#[cfg(not(target_os = "macos"))]
+use screenmirror_lib::permissions::open_screen_recording_settings;
 
 #[test]
 fn check_returns_bool() {

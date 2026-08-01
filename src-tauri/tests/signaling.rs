@@ -5,7 +5,6 @@ use screenmirror_lib::signaling::handlers::{build_router, parse_message};
 use screenmirror_lib::signaling::handlers::HostPeerMap;
 use screenmirror_lib::signaling::room::Room;
 use screenmirror_lib::signaling::room_id::RoomIDService;
-use screenmirror_lib::webrtc::CaptureTarget;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

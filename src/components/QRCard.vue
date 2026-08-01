@@ -56,6 +56,10 @@ const errorMessage = ref('');
 const lastFetchError = ref('');
 
 let pollTimer: number | undefined;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 let roomSessionReady = false;
 
 const state = computed<'idle' | 'ready' | 'busy' | 'unavailable'>(() => {
@@ -86,8 +90,8 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
   let port = 0;
   try {
     [ip, port] = await Promise.all([api.getLanIp(), api.getPort()]);
-  } catch (e: any) {
-    errors.push(`ipc:${e?.message ?? e}`);
+  } catch (e: unknown) {
+    errors.push(`ipc:${errorText(e)}`);
   }
   // The host shell writes the current waiting-room id here after
   // createWaitingSession(). The QR URL needs the room id in the path so
@@ -114,20 +118,11 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
     }
   }
   if (ip && port) {
-    try {
-      return {
-        lan_ip: ip,
-        port,
-        room_id: roomId,
-      };
-    } catch (e: any) {
-      errors.push(`devices:${e?.message ?? e}`);
-      return {
-        lan_ip: ip,
-        port,
-        room_id: roomId,
-      };
-    }
+    return {
+      lan_ip: ip,
+      port,
+      room_id: roomId,
+    };
   }
 
   // 1b) If we know the port but not the LAN IP, fall back to 127.0.0.1.
@@ -153,8 +148,8 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
           if (j.lan_ip && j.port) return j;
         }
       }
-    } catch (e: any) {
-      errors.push(`fetch:${p}:${e?.message ?? e}`);
+    } catch (e: unknown) {
+      errors.push(`fetch:${p}:${errorText(e)}`);
     }
   }
 
@@ -169,8 +164,8 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
       }
       errors.push(`rel:${ct}`);
     }
-  } catch (e: any) {
-    errors.push(`rel:${e?.message ?? e}`);
+  } catch (e: unknown) {
+    errors.push(`rel:${errorText(e)}`);
   }
 
   // Stash the last error so the UI can show it for debugging.

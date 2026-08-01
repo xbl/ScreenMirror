@@ -104,6 +104,7 @@ pub fn write_text_to_clipboard(_text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(unreachable_code)]
 pub fn relaunch_app(app: AppHandle) -> Result<(), String> {
     app.restart();
     Ok(())

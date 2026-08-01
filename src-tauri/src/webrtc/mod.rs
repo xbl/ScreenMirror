@@ -847,7 +847,7 @@ pub fn spawn_video_capture_loop(
                 None
             }
         };
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "screenkit"))]
         let mut screenkit_capture = if use_screenkit_capture {
             match start_screen_capture(target.clone(), fps) {
                 Ok(capture) => {
