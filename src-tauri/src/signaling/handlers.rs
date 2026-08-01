@@ -378,6 +378,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
 
     state.viewer_sinks.lock().remove(&connection_id);
     state.devices.lock().release_device(&connection_id);
+    let _target_switch = state.capture_target_switch_lock.lock();
     if let Some(peer) = state.host_peers.lock().remove(&connection_id) {
         peer.stop();
     }

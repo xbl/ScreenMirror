@@ -15,10 +15,15 @@ use std::time::{Duration, Instant};
 mod tests {
     use super::{
         advance_rtp_timestamp, capture_fps_for_target, plan_target_switch, prepare_all, queue_admission,
-        require_expected_generation, should_drop_encoded_frame, QueueAdmission, TargetSwitchPlan,
+        require_expected_generation, should_drop_encoded_frame, HostPeer, QueueAdmission,
+        TargetSwitchPlan,
     };
     use crate::webrtc::{CaptureKind, CaptureTarget};
-    use std::time::Duration;
+    use std::{
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn keeps_stale_keyframe_for_stream_start_but_drops_stale_delta() {
@@ -91,11 +96,11 @@ mod tests {
     #[test]
     fn timestamp_remains_monotonic_when_the_capture_profile_fps_changes() {
         let after_30_fps = advance_rtp_timestamp(9_000, 30);
-        let after_20_fps = advance_rtp_timestamp(after_30_fps, 20);
+        let after_15_fps = advance_rtp_timestamp(after_30_fps, 15);
 
         assert_eq!(after_30_fps, 12_000);
-        assert_eq!(after_20_fps, 16_500);
-        assert!(after_20_fps > after_30_fps);
+        assert_eq!(after_15_fps, 18_000);
+        assert!(after_15_fps > after_30_fps);
     }
 
     #[test]
@@ -107,7 +112,7 @@ mod tests {
             quality: 0.95,
         };
 
-        assert_eq!(capture_fps_for_target(&active_target), 20);
+        assert_eq!(capture_fps_for_target(&active_target), 15);
     }
 
     #[test]
@@ -116,6 +121,33 @@ mod tests {
             .expect_err("a prepared target cannot commit over a newer generation");
 
         assert_eq!(error, "capture generation changed from 7 to 8");
+    }
+
+    #[test]
+    fn queued_keyframe_wins_when_a_competing_sink_enqueues_after_commit() {
+        assert_eq!(queue_admission(true, true), QueueAdmission::KeepExisting);
+    }
+
+    #[test]
+    fn stop_waits_for_the_capture_switch_commit_boundary() {
+        let peer = Arc::new(HostPeer::new());
+        let switch_guard = peer.capture_switch_lock.lock();
+        let peer_for_stop = peer.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let stop_thread = thread::spawn(move || {
+            started_tx.send(()).expect("test receiver remains available");
+            peer_for_stop.stop();
+            finished_tx.send(()).expect("test receiver remains available");
+        });
+
+        started_rx.recv().expect("stop thread starts");
+        assert!(finished_rx.try_recv().is_err());
+        drop(switch_guard);
+        finished_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("stop proceeds after the commit boundary");
+        stop_thread.join().expect("stop thread exits");
     }
 }
 
@@ -319,6 +351,9 @@ pub struct HostPeer {
     capture_generation: Arc<AtomicU64>,
     rtp_timestamp_step: Arc<AtomicI64>,
     capture_switch_lock: Arc<Mutex<()>>,
+    /// Serializes sink enqueues with the switch transaction's queue reset and
+    /// first-keyframe publication.
+    frame_queue_lock: Arc<Mutex<()>>,
     /// Kept for compatibility; no data channel is created or used.
     pub channel_id: Arc<Mutex<Option<str0m::channel::ChannelId>>>,
     /// Negotiated video media identifier used by the RTP writer.
@@ -344,6 +379,7 @@ impl HostPeer {
             capture_generation: Arc::new(AtomicU64::new(0)),
             rtp_timestamp_step: Arc::new(AtomicI64::new(3_000)),
             capture_switch_lock: Arc::new(Mutex::new(())),
+            frame_queue_lock: Arc::new(Mutex::new(())),
             channel_id: Arc::new(Mutex::new(None)),
             video_mid: Arc::new(Mutex::new(None)),
             frame_tx: tx,
@@ -401,6 +437,7 @@ impl HostPeer {
     }
 
     pub fn stop(&self) {
+        let _switch = self.capture_switch_lock.lock();
         self.capture_generation.fetch_add(1, Ordering::SeqCst);
         if let Some(handle) = self.capture_handle.lock().take() {
             handle.stop();
@@ -465,33 +502,33 @@ impl HostPeer {
         Ok(())
     }
 
-    pub fn commit_target_switch(&self, mut prepared: PreparedTargetSwitch) -> Result<(), String> {
+    pub fn commit_target_switch(&self, mut prepared: PreparedTargetSwitch) {
         let _switch = self.capture_switch_lock.lock();
-        self.validate_prepared_target_switch(&prepared)?;
         let Some(mut candidate) = prepared.candidate.take() else {
             *self.active_target.lock() = Some(prepared.target);
             self.rtp_timestamp_step
                 .store(90_000 / i64::from(prepared.fps.max(1)), Ordering::SeqCst);
-            return Ok(());
+            return;
         };
         let first_keyframe = candidate
             .take_first_keyframe()
             .expect("validated prepared capture retains its startup keyframe");
 
-        // No fallible work remains after this point: the candidate already
-        // captured and encoded an IDR, while the current capture is still live.
+        // The batch validation established that this candidate retains an IDR.
+        // Holding the queue lock makes clear + generation + enqueue atomic
+        // against every active capture sink, so the first frame cannot be
+        // displaced before it is committed.
         let old_handle = self.capture_handle.lock().take();
-        self.clear_queued_frames();
-        self.capture_generation
-            .store(candidate.generation, Ordering::SeqCst);
-        if !self.enqueue_frame(QueuedEncodedFrame {
-            generation: candidate.generation,
-            frame: first_keyframe,
-        }) {
+        {
+            let _queue = self.frame_queue_lock.lock();
+            self.clear_queued_frames_locked();
             self.capture_generation
-                .store(prepared.expected_generation, Ordering::SeqCst);
-            *self.capture_handle.lock() = old_handle;
-            return Err("could not queue prepared keyframe; retained current target".into());
+                .store(candidate.generation, Ordering::SeqCst);
+            let queued = self.enqueue_frame_locked(QueuedEncodedFrame {
+                generation: candidate.generation,
+                frame: first_keyframe,
+            });
+            assert!(queued, "a live peer retains the committed-frame receiver");
         }
         candidate.activate();
         *self.capture_handle.lock() = Some(candidate.take_handle());
@@ -501,12 +538,13 @@ impl HostPeer {
         if let Some(handle) = old_handle {
             handle.stop();
         }
-        Ok(())
     }
 
     pub fn switch_target(&self, target: CaptureTarget, fps: u32) -> Result<(), String> {
         let prepared = self.prepare_target_switch(target, fps)?;
-        self.commit_target_switch(prepared)
+        self.validate_prepared_target_switch(&prepared)?;
+        self.commit_target_switch(prepared);
+        Ok(())
     }
 
     fn start_capture_if_needed(&self) -> Result<(), String> {
@@ -529,6 +567,7 @@ impl HostPeer {
     ) -> Result<CandidateCapture, String> {
         let frame_tx = self.frame_tx.clone();
         let frame_rx = self.frame_rx.clone();
+        let frame_queue_lock = self.frame_queue_lock.clone();
         let capture_generation = self.capture_generation.clone();
         let first_keyframe = Arc::new(Mutex::new(None));
         let first_keyframe_for_sink = first_keyframe.clone();
@@ -538,6 +577,7 @@ impl HostPeer {
         let sink: VideoFrameSink = Arc::new(move |frame| {
             if active_for_sink.load(Ordering::SeqCst) {
                 if capture_generation.load(Ordering::SeqCst) == generation {
+                    let _queue = frame_queue_lock.lock();
                     let _ = enqueue_queued_frame(
                         &frame_tx,
                         &frame_rx,
@@ -567,11 +607,16 @@ impl HostPeer {
         })
     }
 
-    fn enqueue_frame(&self, queued: QueuedEncodedFrame) -> bool {
+    fn enqueue_frame_locked(&self, queued: QueuedEncodedFrame) -> bool {
         enqueue_queued_frame(&self.frame_tx, &self.frame_rx, queued)
     }
 
     fn clear_queued_frames(&self) {
+        let _queue = self.frame_queue_lock.lock();
+        self.clear_queued_frames_locked();
+    }
+
+    fn clear_queued_frames_locked(&self) {
         while self.frame_rx.lock().try_recv().is_ok() {}
     }
 

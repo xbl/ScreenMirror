@@ -249,9 +249,9 @@ fn profile_max_dim(quality: f32) -> u32 {
 
 pub fn profile_fps(quality: f32) -> u32 {
     if quality >= 0.9 {
-        20
+        15
     } else if quality >= 0.65 {
-        30
+        15
     } else {
         30
     }
@@ -759,7 +759,7 @@ mod tests {
     use super::{
         capture_bitrate_kbps, legacy_capture_source_id, normalize_captured_rgba_with_max_dim,
         normalize_encoder_dimensions, next_screenkit_timeout_count, profile_max_dim,
-        select_source_index, should_abandon_screenkit_after_timeouts,
+        profile_fps, select_source_index, should_abandon_screenkit_after_timeouts,
     };
     use image::RgbaImage;
 
@@ -785,6 +785,13 @@ mod tests {
         assert_eq!(profile_max_dim(0.5), 1920);
         assert_eq!(profile_max_dim(0.75), 1920);
         assert_eq!(profile_max_dim(1.0), 3840);
+    }
+
+    #[test]
+    fn high_and_ultra_profiles_prioritize_readable_frames_at_fifteen_fps() {
+        assert_eq!(profile_fps(0.5), 30);
+        assert_eq!(profile_fps(0.75), 15);
+        assert_eq!(profile_fps(1.0), 15);
     }
 
     #[test]
