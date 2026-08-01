@@ -163,56 +163,14 @@ pub fn run() {
             commands::set_capture_target,
         ])
         .setup(move |app| {
-            // System tray: "Show window" and "Quit" entries. Without this the
-            // app would not appear in the macOS menu bar.
+            // The tray icon is intentionally menu-less. Clicking it opens the
+            // AirPlay-style quick-share window instead of stacking a native
+            // menu next to that window.
             let handle = app.handle().clone();
             if let Some(icon) = app.default_window_icon().cloned() {
                 let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
                     .icon(icon)
                     .tooltip("Screenmirror")
-                    .menu(
-                        &tauri::menu::Menu::with_items(
-                            app,
-                            &[
-                                &tauri::menu::MenuItem::with_id(
-                                    app,
-                                    "panel",
-                                    "Quick share",
-                                    true,
-                                    None::<&str>,
-                                )
-                                .unwrap(),
-                                &tauri::menu::MenuItem::with_id(
-                                    app,
-                                    "show",
-                                    "Show",
-                                    true,
-                                    None::<&str>,
-                                )
-                                .unwrap(),
-                                &tauri::menu::MenuItem::with_id(
-                                    app,
-                                    "quit",
-                                    "Quit",
-                                    true,
-                                    None::<&str>,
-                                )
-                                .unwrap(),
-                            ],
-                        )
-                        .unwrap(),
-                    )
-                    .on_menu_event(move |app, event| match event.id().as_ref() {
-                        "panel" => toggle_tray_panel(app),
-                        "show" => {
-                            if let Some(w) = app.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
-                        }
-                        "quit" => app.exit(0),
-                        _ => {}
-                    })
                     .on_tray_icon_event(|tray, event| {
                         use tauri::tray::TrayIconEvent;
                         if let TrayIconEvent::Click { .. } = event {
