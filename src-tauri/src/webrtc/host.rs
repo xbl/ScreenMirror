@@ -14,15 +14,16 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_rtp_timestamp, capture_fps_for_target, plan_target_switch, prepare_all, queue_admission,
-        require_expected_generation, should_drop_encoded_frame, HostPeer, QueueAdmission,
-        TargetSwitchPlan,
+        advance_rtp_timestamp, capture_fps_for_target, dequeue_queued_frame, plan_target_switch,
+        prepare_all, queue_admission, require_expected_generation, should_drop_encoded_frame,
+        HostPeer, QueueAdmission, QueuedEncodedFrame, TargetSwitchPlan,
     };
-    use crate::webrtc::{CaptureKind, CaptureTarget};
+    use crate::webrtc::{CaptureKind, CaptureTarget, H264EncodedFrame};
+    use parking_lot::Mutex;
     use std::{
         sync::{mpsc, Arc},
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     #[test]
@@ -126,6 +127,27 @@ mod tests {
     #[test]
     fn queued_keyframe_wins_when_a_competing_sink_enqueues_after_commit() {
         assert_eq!(queue_admission(true, true), QueueAdmission::KeepExisting);
+    }
+
+    #[test]
+    fn dequeue_returns_before_any_capture_switch_lock_is_taken() {
+        let (frame_tx, frame_rx) = mpsc::sync_channel(1);
+        let frame_rx = Arc::new(Mutex::new(frame_rx));
+        frame_tx
+            .send(QueuedEncodedFrame {
+                generation: 1,
+                frame: H264EncodedFrame {
+                    data: vec![0x65],
+                    keyframe: true,
+                    captured_at: Instant::now(),
+                },
+            })
+            .expect("queue has capacity");
+
+        let queued = dequeue_queued_frame(&frame_rx).expect("queued frame is available");
+
+        assert_eq!(queued.generation, 1);
+        assert!(frame_rx.try_lock().is_some(), "dequeue releases the receiver mutex");
     }
 
     #[test]
@@ -257,6 +279,13 @@ fn enqueue_queued_frame(
         }
         Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
     }
+}
+
+/// Dequeue into an owned value before acquiring any other capture lock.
+fn dequeue_queued_frame(
+    frame_rx: &Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+) -> Option<QueuedEncodedFrame> {
+    frame_rx.lock().try_recv().ok()
 }
 
 struct CandidateCapture {
@@ -706,7 +735,7 @@ impl HostPeer {
                 }
 
                 if let Some(mid) = video_mid {
-                    if let Ok(queued) = frame_rx.lock().try_recv() {
+                    if let Some(queued) = dequeue_queued_frame(&frame_rx) {
                         let _switch = capture_switch_lock.lock();
                         if capture_generation.load(Ordering::SeqCst) != queued.generation {
                             continue;
