@@ -34,6 +34,7 @@ export const api = {
   openExternalLink: (url: string) => invoke<void>('open_external_link', { url }),
   writeTextToClipboard: (text: string) => invoke<void>('write_text_to_clipboard', { text }),
   relaunchApp: () => invoke<void>('relaunch_app'),
+  exitApp: () => invoke<void>('exit_app'),
   getConnectedDevices: () => invoke<Device[]>('get_connected_devices'),
   disconnectDevice: (id: string) => invoke<boolean>('disconnect_device', { id }),
   disconnectAllDevices: () => invoke<void>('disconnect_all_devices'),

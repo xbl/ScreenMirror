@@ -2,6 +2,7 @@ export default {
   app: {
     title: 'Screenmirror',
     reset: '重置',
+    exit: '退出 Screenmirror',
   },
   tray: {
     title: '快速投屏',

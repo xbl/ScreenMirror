@@ -186,6 +186,7 @@ pub fn run() {
             commands::open_external_link,
             commands::write_text_to_clipboard,
             commands::relaunch_app,
+            commands::exit_app,
             commands::get_connected_devices,
             commands::disconnect_device,
             commands::disconnect_all_devices,

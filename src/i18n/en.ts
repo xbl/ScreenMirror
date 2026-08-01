@@ -2,6 +2,7 @@ export default {
   app: {
     title: 'Screenmirror',
     reset: 'Reset',
+    exit: 'Quit Screenmirror',
   },
   tray: {
     title: 'Quick share',

@@ -8,12 +8,18 @@
           <h1>{{ t('tray.title') }}</h1>
         </div>
       </div>
-      <button class="tray-settings" type="button" :aria-label="t('settings.title')" @click="showSettings = true">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-          <path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.7a1.8 1.8 0 0 1 0-3h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3h-.2a1.8 1.8 0 0 0-.9 3Z" />
-        </svg>
-      </button>
+      <div class="tray-head-actions">
+        <button class="tray-devices" type="button" :aria-label="t('devices.title')" @click="showDevices = true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 4h10M9 16h6" /></svg>
+          <strong v-if="viewerCount > 0">{{ viewerCount }}</strong>
+        </button>
+        <button class="tray-settings" type="button" :aria-label="t('settings.title')" @click="showSettings = true">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+            <path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.7a1.8 1.8 0 0 1 0-3h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3h-.2a1.8 1.8 0 0 0-.9 3Z" />
+          </svg>
+        </button>
+      </div>
     </header>
 
     <QRCard class="tray-qr" />
@@ -25,24 +31,8 @@
         v-model:viewerCount="viewerCount"
       />
       <div class="tray-actions">
-        <button class="tray-action" type="button" @click="showDevices = true">
-          <span>{{ t('devices.title') }}</span>
-          <strong>{{ viewerCount }}</strong>
-        </button>
-      </div>
-    </section>
-
-    <section class="tray-permission" :data-ok="permissionGranted">
-      <div>
-        <span class="tray-section-label">{{ t('permission.title') }}</span>
-        <strong>{{ permissionGranted ? t('permission.granted') : t('permission.required') }}</strong>
-      </div>
-      <div class="tray-permission-actions">
-        <button class="tray-text-action" type="button" @click="checkPermission">
-          {{ t('permission.recheck') }}
-        </button>
-        <button class="tray-text-action" type="button" @click="openPermissionSettings">
-          {{ t('permission.openSettings') }}
+        <button class="tray-action tray-exit" type="button" @click="exitApp">
+          <span>{{ t('app.exit') }}</span>
         </button>
       </div>
     </section>
@@ -53,23 +43,22 @@
     />
     <SettingsOverlay
       :open="showSettings"
+      :viewer-count="viewerCount"
       @close="showSettings = false"
+      @open-devices="showDevices = true; showSettings = false"
       @reset="onReset"
     />
-    <ScreenRecordingPermissionModal ref="permissionModal" />
   </main>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, provide, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import QRCard from './QRCard.vue';
 import SourcePicker from './SourcePicker.vue';
 import StartButton from './StartButton.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
-import ScreenRecordingPermissionModal from './ScreenRecordingPermissionModal.vue';
-import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
 import { api } from '../utils/api';
 
 const { t } = useI18n();
@@ -77,9 +66,6 @@ const showDevices = ref(false);
 const showSettings = ref(false);
 const sharing = ref(false);
 const viewerCount = ref(0);
-const permissionGranted = ref(false);
-const permissionModal: ProvidedPermissionModal = ref(null);
-provide(PermissionModalKey, permissionModal);
 let poll: number | undefined;
 
 async function refreshState() {
@@ -89,29 +75,15 @@ async function refreshState() {
   } catch {
     /* tolerate startup races while the host server comes up */
   }
-  await checkPermission();
-}
-
-async function checkPermission() {
-  try {
-    permissionGranted.value = await api.checkScreenRecordingPermission();
-  } catch {
-    permissionGranted.value = false;
-  }
-}
-
-async function openPermissionSettings() {
-  try {
-    await api.openScreenRecordingSettings();
-  } catch {
-    await permissionModal.value?.checkAndShow();
-  }
 }
 
 async function onReset() {
   sharing.value = false;
   viewerCount.value = 0;
-  await checkPermission();
+}
+
+async function exitApp() {
+  await api.exitApp();
 }
 
 onMounted(() => {
@@ -147,6 +119,12 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.tray-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tray-mark {
   width: 30px;
   height: 30px;
@@ -171,7 +149,8 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.tray-settings {
+.tray-settings,
+.tray-devices {
   display: grid;
   width: 32px;
   height: 32px;
@@ -183,7 +162,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.tray-settings svg {
+.tray-settings svg,
+.tray-devices svg {
   width: 17px;
   height: 17px;
   fill: none;
@@ -193,9 +173,29 @@ onBeforeUnmount(() => {
   stroke-width: 1.7;
 }
 
-.tray-settings:hover {
+.tray-settings:hover,
+.tray-devices:hover {
   color: var(--text-strong);
   background: var(--surface-3);
+}
+
+.tray-devices {
+  position: relative;
+}
+
+.tray-devices strong {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  color: var(--surface);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 8px;
+  background: var(--accent);
 }
 
 :deep(.qr-card) {
@@ -239,6 +239,10 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 10px;
+}
+
+.tray-exit {
+  color: var(--danger, #d86b6b);
 }
 
 .tray-action {

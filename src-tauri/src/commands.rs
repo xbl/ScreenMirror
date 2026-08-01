@@ -111,6 +111,11 @@ pub fn relaunch_app(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn exit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 pub fn get_connected_devices(state: State<'_, CommandState>) -> Vec<Device> {
     state.devices.lock().get_devices()
 }
