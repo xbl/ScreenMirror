@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 mod tests {
     use super::{
         advance_rtp_timestamp, capture_fps_for_target, plan_target_switch, prepare_all, queue_admission,
-        should_drop_encoded_frame, QueueAdmission, TargetSwitchPlan,
+        require_expected_generation, should_drop_encoded_frame, QueueAdmission, TargetSwitchPlan,
     };
     use crate::webrtc::{CaptureKind, CaptureTarget};
     use std::time::Duration;
@@ -109,6 +109,14 @@ mod tests {
 
         assert_eq!(capture_fps_for_target(&active_target), 20);
     }
+
+    #[test]
+    fn generation_mismatch_blocks_commit_before_any_target_is_published() {
+        let error = require_expected_generation(8, 7)
+            .expect_err("a prepared target cannot commit over a newer generation");
+
+        assert_eq!(error, "capture generation changed from 7 to 8");
+    }
 }
 
 use parking_lot::Mutex;
@@ -180,6 +188,14 @@ fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
 
 fn capture_fps_for_target(target: &CaptureTarget) -> u32 {
     crate::webrtc::profile_fps(target.quality)
+}
+
+fn require_expected_generation(current: u64, expected: u64) -> Result<(), String> {
+    if current == expected {
+        Ok(())
+    } else {
+        Err(format!("capture generation changed from {expected} to {current}"))
+    }
 }
 
 struct QueuedEncodedFrame {
@@ -431,23 +447,36 @@ impl HostPeer {
         }
     }
 
-    pub fn commit_target_switch(&self, mut prepared: PreparedTargetSwitch) {
+    pub fn validate_prepared_target_switch(
+        &self,
+        prepared: &PreparedTargetSwitch,
+    ) -> Result<(), String> {
+        require_expected_generation(
+            self.capture_generation.load(Ordering::SeqCst),
+            prepared.expected_generation,
+        )?;
+        if prepared
+            .candidate
+            .as_ref()
+            .is_some_and(|candidate| candidate.first_keyframe.lock().is_none())
+        {
+            return Err("prepared capture lost its startup keyframe".into());
+        }
+        Ok(())
+    }
+
+    pub fn commit_target_switch(&self, mut prepared: PreparedTargetSwitch) -> Result<(), String> {
         let _switch = self.capture_switch_lock.lock();
+        self.validate_prepared_target_switch(&prepared)?;
         let Some(mut candidate) = prepared.candidate.take() else {
             *self.active_target.lock() = Some(prepared.target);
             self.rtp_timestamp_step
                 .store(90_000 / i64::from(prepared.fps.max(1)), Ordering::SeqCst);
-            return;
+            return Ok(());
         };
-
-        if self.capture_generation.load(Ordering::SeqCst) != prepared.expected_generation {
-            tracing::warn!("host: prepared capture superseded before commit; retaining current target");
-            return;
-        }
-        let Some(first_keyframe) = candidate.take_first_keyframe() else {
-            tracing::warn!("host: prepared capture lost its startup keyframe; retaining current target");
-            return;
-        };
+        let first_keyframe = candidate
+            .take_first_keyframe()
+            .expect("validated prepared capture retains its startup keyframe");
 
         // No fallible work remains after this point: the candidate already
         // captured and encoded an IDR, while the current capture is still live.
@@ -462,8 +491,7 @@ impl HostPeer {
             self.capture_generation
                 .store(prepared.expected_generation, Ordering::SeqCst);
             *self.capture_handle.lock() = old_handle;
-            tracing::error!("host: could not queue prepared keyframe; retaining current target");
-            return;
+            return Err("could not queue prepared keyframe; retained current target".into());
         }
         candidate.activate();
         *self.capture_handle.lock() = Some(candidate.take_handle());
@@ -473,12 +501,12 @@ impl HostPeer {
         if let Some(handle) = old_handle {
             handle.stop();
         }
+        Ok(())
     }
 
     pub fn switch_target(&self, target: CaptureTarget, fps: u32) -> Result<(), String> {
         let prepared = self.prepare_target_switch(target, fps)?;
-        self.commit_target_switch(prepared);
-        Ok(())
+        self.commit_target_switch(prepared)
     }
 
     fn start_capture_if_needed(&self) -> Result<(), String> {
@@ -547,7 +575,12 @@ impl HostPeer {
         while self.frame_rx.lock().try_recv().is_ok() {}
     }
 
-    pub fn start_sharing(self: Arc<Self>, target: CaptureTarget, fps: u32) -> Result<(), String> {
+    pub fn start_sharing(
+        self: Arc<Self>,
+        target: CaptureTarget,
+        fps: u32,
+        capture_target_switch_lock: Arc<Mutex<()>>,
+    ) -> Result<(), String> {
         self.switch_target(target, fps)?;
         let socket = self
             .socket
@@ -610,6 +643,7 @@ impl HostPeer {
                                 event.mid,
                                 event.direction
                             );
+                            let _target_switch = capture_target_switch_lock.lock();
                             if let Err(error) = peer_for_loop.start_capture_if_needed() {
                                 tracing::error!("host: initial capture did not start: {error}");
                             }

@@ -240,8 +240,11 @@ pub fn set_capture_target(
         peer.prepare_target_switch(target.clone(), fps)
             .map(|prepared| (peer, prepared))
     })?;
+    for (peer, prepared_target) in &prepared {
+        peer.validate_prepared_target_switch(prepared_target)?;
+    }
     for (peer, prepared_target) in prepared {
-        peer.commit_target_switch(prepared_target);
+        peer.commit_target_switch(prepared_target)?;
     }
     *state.capture_target.lock() = Some(target);
     Ok(())

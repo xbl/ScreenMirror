@@ -301,7 +301,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                     });
                                     if let Some(target) = target {
                                         let fps = crate::webrtc::profile_fps(target.quality);
-                                        if let Err(error) = peer_entry.clone().start_sharing(target, fps) {
+                                        if let Err(error) = peer_entry.clone().start_sharing(
+                                            target,
+                                            fps,
+                                            state.capture_target_switch_lock.clone(),
+                                        ) {
                                             tracing::error!("start_sharing: {error}");
                                         }
                                     }
