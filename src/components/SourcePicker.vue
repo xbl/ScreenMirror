@@ -23,12 +23,13 @@
             <div class="sp-source-list">
               <button
                 v-for="item in group.items"
-                :key="item.sourceId"
+                :key="sourceKey(item)"
                 class="sp-source"
-                :class="{ selected: item.sourceId === selectedSource?.sourceId }"
+                :class="{ selected: sourceKey(item) === selectedSourceKey }"
                 type="button"
                 :data-source-id="item.sourceId"
-                :aria-pressed="item.sourceId === selectedSource?.sourceId"
+                :data-source-key="sourceKey(item)"
+                :aria-pressed="sourceKey(item) === selectedSourceKey"
                 @click="selectSource(item)"
               >
                 <span v-if="item.preview" class="sp-thumb" aria-hidden="true">
@@ -132,8 +133,16 @@ function resolution(source: CaptureSourceInfo) {
   return t('source.resolution', { width: source.width, height: source.height });
 }
 
+function sourceKey(source: Pick<CaptureSourceInfo, 'kind' | 'sourceId'>) {
+  return `${source.kind}:${source.sourceId}`;
+}
+
+const selectedSourceKey = computed(() =>
+  selectedSource.value ? sourceKey(selectedSource.value) : null,
+);
+
 function isPreviewLoading(source: CaptureSourceInfo | null) {
-  return source !== null && previewLoadingIds.value.has(source.sourceId);
+  return source !== null && previewLoadingIds.value.has(sourceKey(source));
 }
 
 function captureTarget(source: CaptureSourceInfo, targetQuality = quality.value): CaptureTarget {
@@ -176,7 +185,7 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
   try {
     await api.setCaptureTarget(captureTarget(source, nextQuality));
     if (!isCurrentOperation(operation)) return false;
-    selectedSource.value = sources.value.find((item) => item.sourceId === source.sourceId) ?? source;
+    selectedSource.value = sources.value.find((item) => sourceKey(item) === sourceKey(source)) ?? source;
     quality.value = nextQuality;
     return true;
   } catch {
@@ -188,7 +197,7 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
 
 function refreshPreviews(available: CaptureSourceInfo[], generation: number, forceRefresh: boolean) {
   const displaySources = available.filter((source) => source.kind === 'screen');
-  previewLoadingIds.value = new Set(displaySources.map((source) => source.sourceId));
+  previewLoadingIds.value = new Set(displaySources.map((source) => sourceKey(source)));
   void Promise.all(displaySources
     .map(async (source) => {
       try {
@@ -197,11 +206,11 @@ function refreshPreviews(available: CaptureSourceInfo[], generation: number, for
 
         let refreshedSource: CaptureSourceInfo | null = null;
         sources.value = sources.value.map((item) => {
-          if (item.sourceId !== source.sourceId) return item;
+          if (sourceKey(item) !== sourceKey(source)) return item;
           refreshedSource = { ...item, preview };
           return refreshedSource;
         });
-        if (refreshedSource && selectedSource.value?.sourceId === source.sourceId) {
+        if (refreshedSource && selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) {
           selectedSource.value = refreshedSource;
         }
       } catch {
@@ -209,7 +218,7 @@ function refreshPreviews(available: CaptureSourceInfo[], generation: number, for
       } finally {
         if (generation === refreshGeneration) {
           const next = new Set(previewLoadingIds.value);
-          next.delete(source.sourceId);
+          next.delete(sourceKey(source));
           previewLoadingIds.value = next;
         }
       }
@@ -236,7 +245,7 @@ async function refreshSources(forceRefresh = false) {
 
     if (selectedSource.value) {
       const refreshedSelection = available.find(
-        (source) => source.sourceId === selectedSource.value?.sourceId,
+        (source) => selectedSource.value && sourceKey(source) === sourceKey(selectedSource.value),
       );
       if (refreshedSelection) selectedSource.value = refreshedSelection;
       else error.value = t('source.errorSourceGone');

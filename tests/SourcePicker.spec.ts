@@ -45,6 +45,16 @@ const sources = [
     width: 1440,
     height: 900,
   },
+  {
+    id: 'window:1',
+    sourceId: 'main-display',
+    name: 'Main Display App',
+    kind: 'window' as const,
+    isPrimary: false,
+    preview: null,
+    width: 1280,
+    height: 720,
+  },
 ];
 
 const i18n = createI18n({
@@ -143,6 +153,53 @@ describe('SourcePicker', () => {
       quality: 0.75,
     });
     expect(wrapper.find('[data-source-id="desk-display"]').classes()).toContain('selected');
+  });
+
+  it('keeps display and window sources distinct when native IDs collide', async () => {
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    const display = wrapper.get('[data-source-key="screen:main-display"]');
+    const app = wrapper.get('[data-source-key="window:main-display"]');
+    expect(display.classes()).toContain('selected');
+
+    await app.trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.setCaptureTarget).toHaveBeenLastCalledWith({
+      kind: 'window',
+      id: 1,
+      sourceId: 'main-display',
+      quality: 0.75,
+    });
+    expect(app.classes()).toContain('selected');
+    expect(display.classes()).not.toContain('selected');
+
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([sources[0], sources[3]]);
+    await wrapper.get('.sp-refresh').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="source-preview"] .sp-preview-name').text()).toBe(
+      'Main Display App',
+    );
+  });
+
+  it('uses composite keys for preview loading when display and window IDs collide', async () => {
+    const pendingPreview = deferred<string | null>();
+    apiMocks.getCaptureSourcePreview.mockImplementation(() => pendingPreview.promise);
+
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    expect(wrapper.get('[data-source-key="screen:main-display"] .sp-no-preview').text()).toBe(
+      'Loading preview...',
+    );
+    expect(wrapper.get('[data-source-key="window:main-display"] .sp-no-preview').text()).toBe(
+      'No preview available',
+    );
+
+    pendingPreview.resolve(null);
+    await flushPromises();
   });
 
   it('does not wait for display previews before selecting the default source', async () => {
