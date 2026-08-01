@@ -5,11 +5,26 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{Manager, Runtime};
 
-fn toggle_tray_panel(app: &tauri::AppHandle) {
+fn position_tray_panel(
+    window: &tauri::WebviewWindow,
+    anchor: tauri::PhysicalPosition<f64>,
+) {
+    let x = (anchor.x - 215.0).max(8.0);
+    let y = anchor.y + 12.0;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+fn toggle_tray_panel(
+    app: &tauri::AppHandle,
+    anchor: Option<tauri::PhysicalPosition<f64>>,
+) {
     if let Some(window) = app.get_webview_window("tray-panel") {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
+            if let Some(anchor) = anchor {
+                position_tray_panel(&window, anchor);
+            }
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -28,9 +43,15 @@ fn toggle_tray_panel(app: &tauri::AppHandle) {
         .visible(true)
         .build();
     if let Ok(window) = &result {
+        if let Some(anchor) = anchor {
+            position_tray_panel(window, anchor);
+        }
         let window_for_event = window.clone();
+        let opened_at = std::time::Instant::now();
         window.on_window_event(move |event| {
-            if let tauri::WindowEvent::Focused(false) = event {
+            if opened_at.elapsed() > std::time::Duration::from_millis(350)
+                && matches!(event, tauri::WindowEvent::Focused(false))
+            {
                 let _ = window_for_event.hide();
             }
         });
@@ -173,9 +194,9 @@ pub fn run() {
                     .tooltip("Screenmirror")
                     .on_tray_icon_event(|tray, event| {
                         use tauri::tray::TrayIconEvent;
-                        if let TrayIconEvent::Click { .. } = event {
+                        if let TrayIconEvent::Click { position, .. } = event {
                             let app = tray.app_handle();
-                            toggle_tray_panel(&app);
+                            toggle_tray_panel(&app, Some(position));
                         }
                     })
                     .build(app)?;
