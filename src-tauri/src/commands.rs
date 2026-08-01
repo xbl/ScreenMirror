@@ -258,7 +258,7 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
         window.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    let result = tauri::WebviewWindowBuilder::new(
+    let _window = tauri::WebviewWindowBuilder::new(
         &app,
         "source-picker",
         tauri::WebviewUrl::App("index.html?source-picker=1".into()),
@@ -273,12 +273,6 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
     .visible(true)
     .build()
     .map_err(|e| e.to_string())?;
-    let window_for_event = result.clone();
-    result.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(false) = event {
-            let _ = window_for_event.close();
-        }
-    });
     Ok(())
 }
 

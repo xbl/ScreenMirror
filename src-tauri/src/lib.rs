@@ -46,15 +46,6 @@ fn toggle_tray_panel(
         if let Some(anchor) = anchor {
             position_tray_panel(window, anchor);
         }
-        let window_for_event = window.clone();
-        let opened_at = std::time::Instant::now();
-        window.on_window_event(move |event| {
-            if opened_at.elapsed() > std::time::Duration::from_millis(350)
-                && matches!(event, tauri::WindowEvent::Focused(false))
-            {
-                let _ = window_for_event.hide();
-            }
-        });
     }
     if let Err(error) = result {
         tracing::warn!("failed to open tray panel: {error}");
@@ -194,7 +185,13 @@ pub fn run() {
                     .tooltip("Screenmirror")
                     .on_tray_icon_event(|tray, event| {
                         use tauri::tray::TrayIconEvent;
-                        if let TrayIconEvent::Click { position, .. } = event {
+                        if let TrayIconEvent::Click {
+                            position,
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Down,
+                            ..
+                        } = event
+                        {
                             let app = tray.app_handle();
                             toggle_tray_panel(&app, Some(position));
                         }
