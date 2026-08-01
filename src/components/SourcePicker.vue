@@ -118,6 +118,7 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
 import { api, type CaptureSourceInfo, type CaptureTarget } from '../utils/api';
 import { PermissionModalKey, type ProvidedPermissionModal } from './PermissionModalHost';
@@ -126,6 +127,10 @@ type Quality = 'balanced' | 'high' | 'ultra';
 type Operation = { kind: 'capture' | 'refresh'; sequence: number };
 
 const { t } = useI18n();
+const props = defineProps<{
+  externalChooser?: boolean;
+  standalone?: boolean;
+}>();
 const sources = ref<CaptureSourceInfo[]>([]);
 const selectedSource = ref<CaptureSourceInfo | null>(null);
 const quality = ref<Quality>('high');
@@ -174,11 +179,19 @@ function isPreviewLoading(source: CaptureSourceInfo | null) {
 }
 
 function openPicker() {
+  if (props.externalChooser) {
+    void api.openSourcePickerWindow();
+    return;
+  }
   pickerStep.value = 'types';
   pickerOpen.value = true;
 }
 
 function closePicker() {
+  if (props.standalone) {
+    void getCurrentWindow().close().catch(() => window.close());
+    return;
+  }
   pickerOpen.value = false;
   pickerStep.value = 'types';
 }
@@ -344,6 +357,7 @@ async function changeQuality(event: Event) {
 
 onMounted(() => {
   void refreshSources();
+  if (props.standalone) pickerOpen.value = true;
   window.addEventListener('keydown', onKeydown);
 });
 

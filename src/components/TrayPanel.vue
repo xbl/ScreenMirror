@@ -14,21 +14,21 @@
     </header>
 
     <QRCard class="tray-qr" />
-    <SourcePicker class="tray-source" />
+    <SourcePicker class="tray-source" external-chooser />
   </main>
 </template>
 
 <script setup lang="ts">
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
 import QRCard from './QRCard.vue';
 import SourcePicker from './SourcePicker.vue';
+import { api } from '../utils/api';
 
 const { t } = useI18n();
 
 async function close() {
   try {
-    await getCurrentWindow().hide();
+    await api.closeTrayPanel();
   } catch {
     window.close();
   }

@@ -251,6 +251,45 @@ pub fn get_capture_target(state: State<'_, CommandState>) -> Option<CaptureTarge
     })
 }
 
+#[tauri::command]
+pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("source-picker") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let result = tauri::WebviewWindowBuilder::new(
+        &app,
+        "source-picker",
+        tauri::WebviewUrl::App("index.html?source-picker=1".into()),
+    )
+    .title("Screenmirror")
+    .inner_size(560.0, 720.0)
+    .min_inner_size(480.0, 560.0)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    let window_for_event = result.clone();
+    result.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(false) = event {
+            let _ = window_for_event.close();
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn close_tray_panel(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("tray-panel") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn validate_target_for_empty_peer_set<F>(
     target: &crate::webrtc::CaptureTarget,
     validate: F,

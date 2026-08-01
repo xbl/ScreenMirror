@@ -17,17 +17,25 @@ fn toggle_tray_panel(app: &tauri::AppHandle) {
     }
 
     let url = tauri::WebviewUrl::App("index.html?tray=1".into());
-    if let Err(error) = tauri::WebviewWindowBuilder::new(app, "tray-panel", url)
+    let result = tauri::WebviewWindowBuilder::new(app, "tray-panel", url)
         .title("Screenmirror")
-        .inner_size(430.0, 860.0)
-        .min_inner_size(380.0, 620.0)
+        .inner_size(430.0, 620.0)
+        .min_inner_size(380.0, 560.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(true)
-        .build()
-    {
+        .build();
+    if let Ok(window) = &result {
+        let window_for_event = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                let _ = window_for_event.hide();
+            }
+        });
+    }
+    if let Err(error) = result {
         tracing::warn!("failed to open tray panel: {error}");
     }
 }
@@ -148,8 +156,10 @@ pub fn run() {
             commands::get_pending_device,
             commands::set_device_connected_status,
             commands::enumerate_capture_sources,
+            commands::close_tray_panel,
             commands::get_capture_source_preview,
             commands::get_capture_target,
+            commands::open_source_picker_window,
             commands::set_capture_target,
         ])
         .setup(move |app| {
