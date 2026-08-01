@@ -135,7 +135,10 @@ pub fn start_screen_capture(
         .with_width(display.width())
         .with_height(display.height())
         .with_fps(fps.max(1))
-        .with_queue_depth(1)
+        // Apple's ScreenCaptureKit requires a capture queue depth of at least
+        // three on supported macOS versions. A depth of one can yield the
+        // initial sample and then stop delivering samples under load.
+        .with_queue_depth(3)
         .with_pixel_format(PixelFormat::BGRA);
     config.set_shows_cursor(true);
 
