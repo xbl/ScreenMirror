@@ -82,6 +82,8 @@ export default {
   },
   permission: {
     title: '需要屏幕录制权限',
+    granted: '权限已授予',
+    required: '需要权限',
     body: 'macOS 不会再次自动弹出权限请求。请在系统设置中授予屏幕录制权限后再分享屏幕。',
     step1: '点击「打开系统设置」',
     step2: '在「隐私与安全性 → 屏幕录制」中勾选本应用',

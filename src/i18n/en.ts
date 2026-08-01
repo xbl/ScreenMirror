@@ -82,6 +82,8 @@ export default {
   },
   permission: {
     title: 'Screen Recording Permission Required',
+    granted: 'Permission granted',
+    required: 'Permission required',
     body:
       'macOS no longer shows the permission prompt automatically. Please grant Screen Recording access in System Settings to share your screen.',
     step1: 'Click "Open System Settings"',

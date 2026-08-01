@@ -3,7 +3,10 @@ use crate::signaling::handlers::{build_router, HostPeerMap};
 use crate::signaling::{devices::ConnectedDevicesService, room_id::RoomIDService};
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{Manager, Runtime};
+
+static LAST_TRAY_CLICK: std::sync::OnceLock<Mutex<Option<Instant>>> = std::sync::OnceLock::new();
 
 fn position_tray_panel(
     window: &tauri::WebviewWindow,
@@ -42,10 +45,30 @@ fn show_tray_panel(
         if let Some(anchor) = anchor {
             position_tray_panel(window, anchor);
         }
+        let window_for_event = window.clone();
+        let opened_at = Instant::now();
+        window.on_window_event(move |event| {
+            if opened_at.elapsed() > Duration::from_millis(180)
+                && matches!(event, tauri::WindowEvent::Focused(false))
+            {
+                let _ = window_for_event.hide();
+            }
+        });
     }
     if let Err(error) = result {
         tracing::warn!("failed to open tray panel: {error}");
     }
+}
+
+fn accept_tray_click() -> bool {
+    let last = LAST_TRAY_CLICK.get_or_init(|| Mutex::new(None));
+    let now = Instant::now();
+    let mut previous = last.lock();
+    if previous.is_some_and(|time| now.duration_since(time) < Duration::from_millis(220)) {
+        return false;
+    }
+    *previous = Some(now);
+    true
 }
 
 pub mod commands;
@@ -188,12 +211,35 @@ pub fn run() {
                             ..
                         } = event
                         {
+                            if !accept_tray_click() {
+                                return;
+                            }
                             let app = tray.app_handle();
                             show_tray_panel(&app, Some(position));
                         }
                     })
                     .build(app)?;
                 tracing::info!("tray icon installed");
+
+                let app_handle = app.handle().clone();
+                let devices_for_tray = devices.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut previous = None;
+                    loop {
+                        let count = devices_for_tray.lock().get_devices().len();
+                        if previous != Some(count) {
+                            if let Some(tray) = app_handle.tray_by_id("screenmirror-tray") {
+                                if count == 0 {
+                                    let _ = tray.set_title(None::<&str>);
+                                } else {
+                                    let _ = tray.set_title(Some(count.to_string()));
+                                }
+                            }
+                            previous = Some(count);
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                });
             } else {
                 tracing::warn!("no default window icon; tray disabled");
             }
