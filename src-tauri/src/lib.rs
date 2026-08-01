@@ -1,4 +1,5 @@
 use crate::commands::CommandState;
+use crate::icons::{tray_icon, tray_state_for_count, TrayIconState};
 use crate::signaling::handlers::{build_router, HostPeerMap};
 use crate::signaling::{devices::ConnectedDevicesService, room_id::RoomIDService};
 use parking_lot::Mutex;
@@ -206,52 +207,69 @@ pub fn run() {
             // AirPlay-style quick-share window instead of stacking a native
             // menu next to that window.
             let handle = app.handle().clone();
-            if let Some(icon) = app.default_window_icon().cloned() {
-                let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
-                    .icon(icon)
-                    .icon_as_template(true)
-                    .tooltip("Screenmirror")
-                    .on_tray_icon_event(|tray, event| {
-                        use tauri::tray::TrayIconEvent;
-                        if let TrayIconEvent::Click {
-                            position,
-                            button: tauri::tray::MouseButton::Left,
-                            button_state: tauri::tray::MouseButtonState::Down,
-                            ..
-                        } = event
-                        {
-                            if !accept_tray_click() {
-                                return;
-                            }
-                            let app = tray.app_handle();
-                            show_tray_panel(&app, Some(position));
+            let icon = tray_icon(TrayIconState::Disconnected)?;
+            let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
+                .icon(icon)
+                .icon_as_template(cfg!(target_os = "macos"))
+                .tooltip("Screenmirror")
+                .on_tray_icon_event(|tray, event| {
+                    use tauri::tray::TrayIconEvent;
+                    if let TrayIconEvent::Click {
+                        position,
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Down,
+                        ..
+                    } = event
+                    {
+                        if !accept_tray_click() {
+                            return;
                         }
-                    })
-                    .build(app)?;
-                tracing::info!("tray icon installed");
+                        let app = tray.app_handle();
+                        show_tray_panel(&app, Some(position));
+                    }
+                })
+                .build(app)?;
+            tracing::info!("tray icon installed");
 
-                let app_handle = app.handle().clone();
-                let devices_for_tray = devices.clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut previous = None;
-                    loop {
-                        let count = devices_for_tray.lock().get_devices().len();
-                        if previous != Some(count) {
-                            if let Some(tray) = app_handle.tray_by_id("screenmirror-tray") {
-                                if count == 0 {
-                                    let _ = tray.set_title(None::<&str>);
-                                } else {
-                                    let _ = tray.set_title(Some(count.to_string()));
+            let app_handle = app.handle().clone();
+            let devices_for_tray = devices.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut previous = None;
+                loop {
+                    let count = devices_for_tray.lock().get_devices().len();
+                    if previous != Some(count) {
+                        if let Some(tray) = app_handle.tray_by_id("screenmirror-tray") {
+                            let state = tray_state_for_count(count);
+                            match tray_icon(state) {
+                                Ok(icon) => {
+                                    #[cfg(target_os = "macos")]
+                                    let icon_result = tray.set_icon_with_as_template(Some(icon), true);
+                                    #[cfg(not(target_os = "macos"))]
+                                    let icon_result = tray.set_icon(Some(icon));
+
+                                    if let Err(error) = icon_result {
+                                        tracing::warn!("failed to update tray icon: {error}");
+                                    }
+                                }
+                                Err(error) => {
+                                    tracing::warn!("failed to decode tray icon: {error}");
                                 }
                             }
-                            previous = Some(count);
+
+                            let title_result = if count == 0 {
+                                tray.set_title(None::<&str>)
+                            } else {
+                                tray.set_title(Some(count.to_string()))
+                            };
+                            if let Err(error) = title_result {
+                                tracing::warn!("failed to update tray title: {error}");
+                            }
                         }
-                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        previous = Some(count);
                     }
-                });
-            } else {
-                tracing::warn!("no default window icon; tray disabled");
-            }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            });
 
             let viewer_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
