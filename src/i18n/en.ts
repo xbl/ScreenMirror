@@ -26,6 +26,7 @@ export default {
     resolution: '{width} x {height}',
     loading: 'Loading available sources…',
     noSources: 'No shareable sources are available.',
+    previewLoading: 'Loading preview…',
     noPreview: 'No preview available',
     refresh: 'Refresh sources',
     quality: 'Quality',

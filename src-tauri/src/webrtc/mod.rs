@@ -117,6 +117,7 @@ fn capture_monitor_preview(
     source_id: &str,
     width: u32,
     height: u32,
+    force_refresh: bool,
 ) -> Option<String> {
     let key = PreviewCacheKey {
         source_id: source_id.into(),
@@ -124,9 +125,11 @@ fn capture_monitor_preview(
         height,
     };
     let cache = DISPLAY_PREVIEW_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(cache) = cache.lock() {
-        if let Some(preview) = cache.get(&key) {
-            return Some(preview.clone());
+    if !force_refresh {
+        if let Ok(cache) = cache.lock() {
+            if let Some(preview) = cache.get(&key) {
+                return Some(preview.clone());
+            }
         }
     }
 
@@ -141,7 +144,11 @@ fn capture_monitor_preview(
 
     if let Some(preview) = preview.as_ref() {
         if let Ok(mut cache) = cache.lock() {
-            cache.insert(key, preview.clone());
+            // A normal request that began before a forced refresh must not put
+            // its stale image back into the cache after the refresh completes.
+            if force_refresh || !cache.contains_key(&key) {
+                cache.insert(key, preview.clone());
+            }
         }
     }
     preview
@@ -215,7 +222,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
             let height = m.height().unwrap_or(0);
             out.push(CaptureSourceInfo {
                 id: legacy_capture_source_id("screen", idx),
-                preview: capture_monitor_preview(&m, &source_id, width, height),
+                preview: None,
                 source_id,
                 name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
                 kind: "screen".into(),
@@ -249,6 +256,42 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(Vec::new())
+    }
+}
+
+/// Capture a compact preview for one display after the source metadata has
+/// already been returned to the UI. This intentionally does not participate in
+/// the video capture loop.
+pub fn get_capture_source_preview(
+    source_id: &str,
+    force_refresh: bool,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use xcap::Monitor;
+
+        let monitor = Monitor::all()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|monitor| monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
+        let Some(monitor) = monitor else {
+            return Ok(None);
+        };
+        let width = monitor.width().unwrap_or(0);
+        let height = monitor.height().unwrap_or(0);
+
+        Ok(capture_monitor_preview(
+            &monitor,
+            source_id,
+            width,
+            height,
+            force_refresh,
+        ))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (source_id, force_refresh);
+        Ok(None)
     }
 }
 

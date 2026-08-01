@@ -121,6 +121,7 @@ pub fn run() {
             commands::get_pending_device,
             commands::set_device_connected_status,
             commands::enumerate_capture_sources,
+            commands::get_capture_source_preview,
             commands::set_capture_target,
         ])
         .setup(move |app| {

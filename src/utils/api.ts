@@ -46,6 +46,8 @@ export const api = {
   getPendingDevice: () => invoke<Device | null>('get_pending_device'),
   setDeviceConnectedStatus: () => invoke<void>('set_device_connected_status'),
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
+  getCaptureSourcePreview: (sourceId: string, forceRefresh: boolean) =>
+    invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh }),
   setCaptureTarget: (args: CaptureTarget) =>
     invoke<void>('set_capture_target', { args }),
 };

@@ -6,6 +6,7 @@ import SourcePicker from '../src/components/SourcePicker.vue';
 const apiMocks = vi.hoisted(() => ({
   checkScreenRecordingPermission: vi.fn(),
   enumerateCaptureSources: vi.fn(),
+  getCaptureSourcePreview: vi.fn(),
   setCaptureTarget: vi.fn(),
 }));
 
@@ -20,7 +21,7 @@ const sources = [
     name: 'Built-in Retina Display',
     kind: 'screen' as const,
     isPrimary: true,
-    preview: 'data:image/png;base64,main',
+    preview: null,
     width: 2560,
     height: 1600,
   },
@@ -30,7 +31,7 @@ const sources = [
     name: 'Studio Display',
     kind: 'screen' as const,
     isPrimary: false,
-    preview: 'data:image/png;base64,desk',
+    preview: null,
     width: 1920,
     height: 1080,
   },
@@ -61,6 +62,7 @@ const i18n = createI18n({
         refresh: 'Refresh sources',
         loading: 'Loading available sources...',
         noSources: 'No shareable sources are available.',
+        previewLoading: 'Loading preview...',
         noPreview: 'No preview available',
         quality: 'Quality',
         qualityBalanced: 'Balanced',
@@ -103,6 +105,9 @@ describe('SourcePicker', () => {
     vi.resetAllMocks();
     apiMocks.checkScreenRecordingPermission.mockResolvedValue(true);
     apiMocks.enumerateCaptureSources.mockResolvedValue(sources);
+    apiMocks.getCaptureSourcePreview.mockImplementation((sourceId: string) =>
+      Promise.resolve(`data:image/jpeg;base64,${sourceId}`),
+    );
     apiMocks.setCaptureTarget.mockResolvedValue(undefined);
   });
 
@@ -118,8 +123,9 @@ describe('SourcePicker', () => {
     expect(wrapper.text()).toContain('2560 x 1600');
     expect(wrapper.find('[data-source-id="main-display"]').classes()).toContain('selected');
     expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
-      'data:image/png;base64,main',
+      'data:image/jpeg;base64,main-display',
     );
+    expect(apiMocks.getCaptureSourcePreview).toHaveBeenCalledWith('main-display', false);
   });
 
   it('sends a stable source ID when choosing another source', async () => {
@@ -137,6 +143,41 @@ describe('SourcePicker', () => {
       quality: 0.75,
     });
     expect(wrapper.find('[data-source-id="desk-display"]').classes()).toContain('selected');
+  });
+
+  it('does not wait for display previews before selecting the default source', async () => {
+    const pendingPreview = deferred<string | null>();
+    apiMocks.getCaptureSourcePreview.mockImplementation(() => pendingPreview.promise);
+
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    expect(apiMocks.setCaptureTarget).toHaveBeenCalledWith({
+      kind: 'screen',
+      id: 0,
+      sourceId: 'main-display',
+      quality: 0.75,
+    });
+    expect(wrapper.find('[data-testid="source-preview"] img').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="source-preview"]').text()).toContain('Loading preview...');
+
+    pendingPreview.resolve('data:image/jpeg;base64,main-display');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
+      'data:image/jpeg;base64,main-display',
+    );
+  });
+
+  it('keeps the null preview fallback when preview capture fails', async () => {
+    apiMocks.getCaptureSourcePreview.mockRejectedValue(new Error('capture unavailable'));
+
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="source-preview"] img').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="source-preview"]').text()).toContain('No preview available');
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
 
   it('keeps the previous source selected when switching fails', async () => {
@@ -289,10 +330,11 @@ describe('SourcePicker', () => {
   });
 
   it('replaces the selected display preview after a refresh', async () => {
+    apiMocks.getCaptureSourcePreview.mockResolvedValue('data:image/jpeg;base64,refreshed');
     const wrapper = mountPicker();
     await flushPromises();
     apiMocks.enumerateCaptureSources.mockResolvedValueOnce([
-      { ...sources[0], preview: 'data:image/jpeg;base64,refreshed' },
+      { ...sources[0], preview: null },
     ]);
 
     await wrapper.get('.sp-refresh').trigger('click');
@@ -300,6 +342,31 @@ describe('SourcePicker', () => {
 
     expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
       'data:image/jpeg;base64,refreshed',
+    );
+    expect(apiMocks.getCaptureSourcePreview).toHaveBeenLastCalledWith('main-display', true);
+  });
+
+  it('does not let an older preview request replace a refreshed preview', async () => {
+    const olderPreview = deferred<string | null>();
+    apiMocks.getCaptureSourcePreview.mockImplementation((sourceId: string, forceRefresh: boolean) => {
+      if (sourceId === 'main-display' && !forceRefresh) return olderPreview.promise;
+      if (sourceId === 'main-display') return Promise.resolve('data:image/jpeg;base64,newest');
+      return Promise.resolve(null);
+    });
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    await wrapper.get('.sp-refresh').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
+      'data:image/jpeg;base64,newest',
+    );
+
+    olderPreview.resolve('data:image/jpeg;base64,stale');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="source-preview"] img').attributes('src')).toBe(
+      'data:image/jpeg;base64,newest',
     );
   });
 

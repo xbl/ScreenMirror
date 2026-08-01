@@ -26,6 +26,7 @@ export default {
     resolution: '{width} x {height}',
     loading: '正在载入可分享的来源…',
     noSources: '没有可分享的来源。',
+    previewLoading: '正在载入预览…',
     noPreview: '没有可用预览',
     refresh: '刷新源',
     quality: '画质',

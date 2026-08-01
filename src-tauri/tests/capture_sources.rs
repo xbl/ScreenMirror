@@ -54,3 +54,13 @@ fn enumerate_sources_is_empty_on_non_macos() {
         .expect("non-macOS stub succeeds")
         .is_empty());
 }
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn capture_source_preview_is_empty_on_non_macos() {
+    assert_eq!(
+        screenmirror_lib::webrtc::get_capture_source_preview("display-1", true)
+            .expect("non-macOS preview stub succeeds"),
+        None
+    );
+}

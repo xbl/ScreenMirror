@@ -207,6 +207,14 @@ pub fn enumerate_capture_sources() -> Result<Vec<crate::webrtc::CaptureSourceInf
     crate::webrtc::enumerate_sources()
 }
 
+#[tauri::command]
+pub fn get_capture_source_preview(
+    source_id: String,
+    force_refresh: bool,
+) -> Result<Option<String>, String> {
+    crate::webrtc::get_capture_source_preview(&source_id, force_refresh)
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureTargetArgs {

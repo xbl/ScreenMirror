@@ -2,7 +2,7 @@
   <section class="source-picker" aria-labelledby="source-picker-title">
     <header class="sp-head">
       <span id="source-picker-title" class="sp-eyebrow">{{ t('source.label') }}</span>
-      <button class="sp-refresh" type="button" :disabled="loading" @click="refreshSources">
+      <button class="sp-refresh" type="button" :disabled="loading" @click="refreshSources(true)">
         {{ t('source.refresh') }}
       </button>
     </header>
@@ -29,6 +29,9 @@
                 <span v-if="item.preview" class="sp-thumb" aria-hidden="true">
                   <img :src="item.preview" alt="" />
                 </span>
+                <span v-else-if="isPreviewLoading(item)" class="sp-no-preview">
+                  {{ t('source.previewLoading') }}
+                </span>
                 <span v-else class="sp-no-preview">{{ t('source.noPreview') }}</span>
                 <span class="sp-source-copy">
                   <span class="sp-source-name">{{ item.name }}</span>
@@ -47,6 +50,9 @@
       <aside v-if="selectedSource" class="sp-preview" data-testid="source-preview" aria-live="polite">
         <div class="sp-preview-frame">
           <img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" />
+          <span v-else-if="isPreviewLoading(selectedSource)" class="sp-preview-fallback">
+            {{ t('source.previewLoading') }}
+          </span>
           <span v-else class="sp-preview-fallback">{{ t('source.noPreview') }}</span>
         </div>
         <div v-if="selectedSource" class="sp-preview-copy">
@@ -85,6 +91,7 @@ const selectedSource = ref<CaptureSourceInfo | null>(null);
 const quality = ref<Quality>('high');
 const error = ref('');
 const loading = ref(false);
+const previewLoadingIds = ref(new Set<string>());
 let captureOperation = 0;
 let refreshOperation = 0;
 let refreshGeneration = 0;
@@ -118,6 +125,10 @@ function qualityValue(value: Quality) {
 
 function resolution(source: CaptureSourceInfo) {
   return t('source.resolution', { width: source.width, height: source.height });
+}
+
+function isPreviewLoading(source: CaptureSourceInfo | null) {
+  return source !== null && previewLoadingIds.value.has(source.sourceId);
 }
 
 function captureTarget(source: CaptureSourceInfo, targetQuality = quality.value): CaptureTarget {
@@ -160,7 +171,7 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
   try {
     await api.setCaptureTarget(captureTarget(source, nextQuality));
     if (!isCurrentOperation(operation)) return false;
-    selectedSource.value = source;
+    selectedSource.value = sources.value.find((item) => item.sourceId === source.sourceId) ?? source;
     quality.value = nextQuality;
     return true;
   } catch {
@@ -170,11 +181,42 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
   }
 }
 
-async function refreshSources() {
+function refreshPreviews(available: CaptureSourceInfo[], generation: number, forceRefresh: boolean) {
+  const displaySources = available.filter((source) => source.kind === 'screen');
+  previewLoadingIds.value = new Set(displaySources.map((source) => source.sourceId));
+  void Promise.all(displaySources
+    .map(async (source) => {
+      try {
+        const preview = await api.getCaptureSourcePreview(source.sourceId, forceRefresh);
+        if (!preview || generation !== refreshGeneration) return;
+
+        let refreshedSource: CaptureSourceInfo | null = null;
+        sources.value = sources.value.map((item) => {
+          if (item.sourceId !== source.sourceId) return item;
+          refreshedSource = { ...item, preview };
+          return refreshedSource;
+        });
+        if (refreshedSource && selectedSource.value?.sourceId === source.sourceId) {
+          selectedSource.value = refreshedSource;
+        }
+      } catch {
+        // Preview capture is best-effort; preserve the existing null fallback.
+      } finally {
+        if (generation === refreshGeneration) {
+          const next = new Set(previewLoadingIds.value);
+          next.delete(source.sourceId);
+          previewLoadingIds.value = next;
+        }
+      }
+    }));
+}
+
+async function refreshSources(forceRefresh = false) {
   const operation: Operation = { kind: 'refresh', sequence: ++refreshOperation };
   const generation = ++refreshGeneration;
   error.value = '';
   loading.value = true;
+  previewLoadingIds.value = new Set();
   if (!(await ensurePermission(operation))) {
     if (generation === refreshGeneration) loading.value = false;
     return;
@@ -185,6 +227,7 @@ async function refreshSources() {
     const available = await api.enumerateCaptureSources();
     if (generation !== refreshGeneration) return;
     sources.value = available;
+    refreshPreviews(available, generation, forceRefresh);
 
     if (selectedSource.value) {
       const refreshedSelection = available.find(
