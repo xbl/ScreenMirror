@@ -67,6 +67,12 @@ fn is_native_source_id(source_id: &str) -> bool {
         && !source_id.starts_with("window:")
 }
 
+const SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS: u8 = 3;
+
+fn should_abandon_screenkit_after_timeouts(consecutive_timeouts: u8) -> bool {
+    consecutive_timeouts >= SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS
+}
+
 /// Enumerate available capture sources (monitors + windows).
 pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     #[cfg(target_os = "macos")]
@@ -594,14 +600,36 @@ pub fn spawn_video_capture_loop(
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
         #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
+        let mut screenkit_consecutive_timeouts = 0_u8;
         let mut frames: u32 = 0;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             let frame_index = frames;
             let capture_started = std::time::Instant::now();
-            let captured = if let Some(capture) = screenkit_capture.as_ref() {
-                match capture.recv_timeout(interval) {
-                    Ok(frame) => captured_frame_from_screenkit(frame, target.quality),
-                    Err(ScreenKitError::Unavailable(_)) => continue,
+            let screenkit_result = screenkit_capture
+                .as_ref()
+                .map(|capture| capture.recv_timeout(interval));
+            let captured = if let Some(screenkit_result) = screenkit_result {
+                match screenkit_result {
+                    Ok(frame) => {
+                        screenkit_consecutive_timeouts = 0;
+                        captured_frame_from_screenkit(frame, target.quality)
+                    }
+                    Err(ScreenKitError::Unavailable(_)) => {
+                        screenkit_consecutive_timeouts =
+                            screenkit_consecutive_timeouts.saturating_add(1);
+                        if should_abandon_screenkit_after_timeouts(
+                            screenkit_consecutive_timeouts,
+                        ) {
+                            tracing::warn!(
+                                "ScreenCaptureKit timed out {} consecutive intervals; falling back to xcap",
+                                screenkit_consecutive_timeouts
+                            );
+                            if let Some(capture) = screenkit_capture.take() {
+                                capture.stop();
+                            }
+                        }
+                        continue;
+                    }
                     Err(ScreenKitError::Stopped) => {
                         tracing::warn!("ScreenCaptureKit stopped; falling back to xcap");
                         screenkit_capture = None;
@@ -787,6 +815,12 @@ mod tests {
         .expect("legacy source id falls back to its index");
 
         assert_eq!(source, 99);
+    }
+
+    #[test]
+    fn screenkit_timeout_threshold_allows_three_missed_intervals() {
+        assert!(!should_abandon_screenkit_after_timeouts(2));
+        assert!(should_abandon_screenkit_after_timeouts(3));
     }
 }
 
