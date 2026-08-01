@@ -1,11 +1,9 @@
 <template>
   <TrayPanel v-if="isTrayPanel" />
   <SourcePicker v-else-if="isSourcePicker" standalone />
-  <HostShell v-else />
 </template>
 
 <script setup lang="ts">
-import HostShell from './components/HostShell.vue';
 import TrayPanel from './components/TrayPanel.vue';
 import SourcePicker from './components/SourcePicker.vue';
 

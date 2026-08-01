@@ -11,19 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "Screenmirror",
-        "width": 940,
-        "height": 640,
-        "minWidth": 640,
-        "minHeight": 460,
-        "visible": false,
-        "resizable": true,
-        "fullscreen": false,
-        "titleBarStyle": "Overlay"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

@@ -56,6 +56,7 @@ const errorMessage = ref('');
 const lastFetchError = ref('');
 
 let pollTimer: number | undefined;
+let roomSessionReady = false;
 
 const state = computed<'idle' | 'ready' | 'busy' | 'unavailable'>(() => {
   if (!url.value) return 'idle';
@@ -92,10 +93,25 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
   // createWaitingSession(). The QR URL needs the room id in the path so
   // the viewer knows which room to dial over WebSocket.
   let roomId: string | null = null;
-  try {
-    roomId = window.localStorage.getItem('sm:roomId');
-  } catch {
-    /* ignore */
+  if (!roomSessionReady) {
+    try {
+      roomId = await api.createWaitingSession(undefined);
+      roomSessionReady = true;
+      window.localStorage.setItem('sm:roomId', roomId);
+    } catch {
+      /* keep the last room id as a fallback while the backend starts */
+      try {
+        roomId = window.localStorage.getItem('sm:roomId');
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    try {
+      roomId = window.localStorage.getItem('sm:roomId');
+    } catch {
+      /* ignore */
+    }
   }
   if (ip && port) {
     try {
