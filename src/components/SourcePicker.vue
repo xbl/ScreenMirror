@@ -113,6 +113,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { LogicalSize } from '@tauri-apps/api/dpi';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
 import { api, type CaptureSourceInfo, type CaptureTarget } from '../utils/api';
@@ -130,6 +131,7 @@ const loading = ref(false);
 const pickerStep = ref<PickerStep>('types');
 let captureOperation = 0;
 let refreshGeneration = 0;
+let unlistenTrayOpened: UnlistenFn | undefined;
 
 const orderedKeys = ref<string[]>([]);
 const ordered = computed(() => {
@@ -234,9 +236,21 @@ async function resizePickerWindow(step: PickerStep) {
   await pickerWindow.setSize(new LogicalSize(720, height));
 }
 
-onMounted(() => { void refreshSources(); void resizePickerWindow('types'); window.addEventListener('keydown', onKeydown); });
+onMounted(() => {
+  void refreshSources();
+  void resizePickerWindow('types');
+  window.addEventListener('keydown', onKeydown);
+  if (props.externalChooser) {
+    void listen('tray-panel-opened', () => refreshSources(true)).then((stop) => {
+      unlistenTrayOpened = stop;
+    });
+  }
+});
 watch([pickerStep, orderedWindows], ([step]) => { void resizePickerWindow(step); }, { flush: 'post' });
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
+  unlistenTrayOpened?.();
+});
 </script>
 
 <style scoped>

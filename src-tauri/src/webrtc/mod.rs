@@ -212,6 +212,29 @@ fn legacy_capture_source_id(kind: &str, index: usize) -> String {
     format!("{kind}:{index}")
 }
 
+fn is_shareable_window(app_name: &str, title: &str, width: u32, height: u32) -> bool {
+    const SYSTEM_APPS: [&str; 5] = [
+        "Window Server",
+        "SystemUIServer",
+        "Control Center",
+        "Notification Center",
+        "Dock",
+    ];
+    const SYSTEM_WINDOWS: [&str; 3] = ["Menu Bar", "StatusIndicator", "Desktop"];
+
+    let app_name = app_name.trim();
+    let title = title.trim();
+    !app_name.is_empty()
+        && width >= 160
+        && height >= 80
+        && !SYSTEM_APPS
+            .iter()
+            .any(|system_app| app_name.eq_ignore_ascii_case(system_app))
+        && !SYSTEM_WINDOWS
+            .iter()
+            .any(|system_window| title.eq_ignore_ascii_case(system_window))
+}
+
 fn is_native_source_id(source_id: &str) -> bool {
     !source_id.is_empty() && !source_id.starts_with("screen:") && !source_id.starts_with("window:")
 }
@@ -284,13 +307,18 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
             });
         }
         if let Ok(windows) = Window::all() {
+            let mut window_index = 0;
             for (idx, w) in windows.into_iter().enumerate() {
-                let name = w.title().unwrap_or_else(|_| format!("Window {idx}"));
-                if name.is_empty() {
+                let app_name = w.app_name().unwrap_or_default();
+                let title = w.title().unwrap_or_default();
+                let width = w.width().unwrap_or(0);
+                let height = w.height().unwrap_or(0);
+                if !is_shareable_window(&app_name, &title, width, height) {
                     continue;
                 }
+                let name = if title.is_empty() { app_name } else { title };
                 out.push(CaptureSourceInfo {
-                    id: legacy_capture_source_id("window", idx),
+                    id: legacy_capture_source_id("window", window_index),
                     source_id: w.id().map(|id| id.to_string()).map_err(|error| {
                         format!("failed to read native ID for window {idx}: {error}")
                     })?,
@@ -298,9 +326,10 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                     kind: "window".into(),
                     is_primary: false,
                     preview: None,
-                    width: w.width().unwrap_or(0),
-                    height: w.height().unwrap_or(0),
+                    width,
+                    height,
                 });
+                window_index += 1;
             }
         }
         Ok(out)
@@ -1041,7 +1070,7 @@ pub struct CaptureHandle {
 mod tests {
     use super::{
         begin_preview_request, capture_bitrate_kbps, finish_preview_request,
-        legacy_capture_source_id, next_screenkit_timeout_count,
+        is_shareable_window, legacy_capture_source_id, next_screenkit_timeout_count,
         normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, preview_dimensions,
         preview_from_capture_result, profile_fps, profile_max_dim, select_source_index,
         should_abandon_screenkit_after_timeouts, store_preview_if_current, DisplayPreviewCache,
@@ -1092,6 +1121,20 @@ mod tests {
     #[test]
     fn legacy_screen_source_id_uses_the_enumeration_index() {
         assert_eq!(legacy_capture_source_id("screen", 2), "screen:2");
+    }
+
+    #[test]
+    fn filters_macos_system_windows_from_shareable_sources() {
+        assert!(!is_shareable_window("SystemUIServer", "Menu Bar", 1440, 24));
+        assert!(!is_shareable_window("Window Server", "", 1440, 900));
+        assert!(!is_shareable_window("Terminal", "StatusIndicator", 800, 600));
+        assert!(!is_shareable_window("Terminal", "Small palette", 120, 60));
+    }
+
+    #[test]
+    fn keeps_real_app_windows_in_shareable_sources() {
+        assert!(is_shareable_window("Terminal", "bash", 900, 600));
+        assert!(is_shareable_window("Terminal", "", 900, 600));
     }
 
     #[test]

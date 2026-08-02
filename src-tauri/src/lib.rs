@@ -5,7 +5,7 @@ use crate::signaling::{devices::ConnectedDevicesService, room_id::RoomIDService}
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{Manager, Runtime};
+use tauri::{Emitter, Manager, Runtime};
 
 static LAST_TRAY_CLICK: std::sync::OnceLock<Mutex<Option<Instant>>> = std::sync::OnceLock::new();
 
@@ -28,6 +28,7 @@ fn show_tray_panel(
         }
         let _ = window.show();
         let _ = window.set_focus();
+        let _ = app.emit("tray-panel-opened", ());
         return;
     }
 
@@ -46,6 +47,7 @@ fn show_tray_panel(
         if let Some(anchor) = anchor {
             position_tray_panel(window, anchor);
         }
+        let _ = app.emit("tray-panel-opened", ());
         let window_for_event = window.clone();
         let opened_at = Instant::now();
         window.on_window_event(move |event| {
