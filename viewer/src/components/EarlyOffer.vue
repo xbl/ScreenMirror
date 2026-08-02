@@ -3,13 +3,22 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = defineProps<{ ws: WebSocket | null; roomId: string }>();
 const emit = defineEmits<{ (e: 'ready'): void }>();
 
 const pc = ref<RTCPeerConnection | null>(null);
 let started = false;
+let disconnectTimer: number | undefined;
+
+function closeSignalingConnection() {
+  if (disconnectTimer) {
+    window.clearTimeout(disconnectTimer);
+    disconnectTimer = undefined;
+  }
+  if (props.ws && props.ws.readyState < WebSocket.CLOSING) props.ws.close();
+}
 
 function send(msg: { type: string; payload?: unknown }) {
   const rs = props.ws?.readyState;
@@ -70,7 +79,19 @@ async function startNegotiation() {
     console.log('[early-offer] ice gathering:', pc.value?.iceGatheringState);
   });
   pc.value.addEventListener('connectionstatechange', () => {
-    console.log('[early-offer] connectionState:', pc.value?.connectionState);
+    const state = pc.value?.connectionState;
+    console.log('[early-offer] connectionState:', state);
+    if (state === 'connected') {
+      if (disconnectTimer) window.clearTimeout(disconnectTimer);
+      disconnectTimer = undefined;
+    } else if (state === 'failed' || state === 'closed') {
+      closeSignalingConnection();
+    } else if (state === 'disconnected' && !disconnectTimer) {
+      disconnectTimer = window.setTimeout(() => {
+        disconnectTimer = undefined;
+        if (pc.value?.connectionState === 'disconnected') closeSignalingConnection();
+      }, 2000);
+    }
   });
 
   // Tell the host we're a viewer.
@@ -149,5 +170,11 @@ onMounted(() => {
       } catch {}
     }
   });
+});
+
+onBeforeUnmount(() => {
+  if (disconnectTimer) window.clearTimeout(disconnectTimer);
+  pc.value?.close();
+  closeSignalingConnection();
 });
 </script>
