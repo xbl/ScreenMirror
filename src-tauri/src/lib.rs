@@ -96,12 +96,14 @@ fn update_tray_for_count<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, count: usi
         }
     }
 
-    let title: Option<String> = if count == 0 {
-        None
-    } else {
-        Some(count.to_string())
-    };
-    if let Err(error) = tray.set_title(title) {
+    // macOS can cache a shorter status-item title when the count decreases.
+    // Clearing first forces the NSStatusItem to invalidate its old width and
+    // repaint the new value (including the transition back to no number).
+    if let Err(error) = tray.set_title(None::<String>) {
+        tracing::warn!("failed to clear tray title (count={count}, state={state:?}): {error}");
+    }
+    let title = if count == 0 { String::new() } else { count.to_string() };
+    if let Err(error) = tray.set_title(Some(title)) {
         tracing::warn!("failed to update tray title (count={count}, state={state:?}): {error}");
     }
 }
@@ -246,6 +248,9 @@ pub fn run() {
             let _tray = tauri::tray::TrayIconBuilder::with_id("screenmirror-tray")
                 .icon(icon)
                 .icon_as_template(cfg!(target_os = "macos"))
+                // Initialize the macOS title slot so later `set_title` calls
+                // (the live viewer count) are rendered beside the icon.
+                .title("")
                 .tooltip("Screenmirror")
                 .on_tray_icon_event(|tray, event| {
                     use tauri::tray::TrayIconEvent;
