@@ -48,6 +48,7 @@ pub struct NativeVideoEncoder {
     /// one frame per call.
     pending: std::collections::VecDeque<H264EncodedFrame>,
     force_keyframe_next: bool,
+    emitted_keyframe: bool,
 }
 
 fn cstr(s: &str) -> CString {
@@ -117,7 +118,12 @@ impl NativeVideoEncoder {
             (*ctx).bit_rate = (bitrate_kbps as i64) * 1000;
             (*ctx).time_base = av::AVRational {
                 num: 1,
-                den: fps_c * 1000,
+                // PTS advances by one for each captured frame below, so the
+                // time base must be the actual frame cadence. Using
+                // `fps * 1000` makes frames appear 1000x too fast and causes
+                // VideoToolbox to buffer indefinitely (window sharing then
+                // shows only its first frame).
+                den: fps_c,
             };
             (*ctx).framerate = av::AVRational { num: fps_c, den: 1 };
             (*ctx).gop_size = fps_c * 2;
@@ -218,6 +224,7 @@ impl NativeVideoEncoder {
                 next_pts: 0,
                 pending: std::collections::VecDeque::new(),
                 force_keyframe_next: true,
+                emitted_keyframe: false,
             };
 
             Ok(enc)
@@ -244,8 +251,20 @@ impl NativeVideoEncoder {
                 // cast is safe.
                 let data_ptr = (*self.packet).data;
                 let data_size = (*self.packet).size as usize;
-                let is_key = (*self.packet).flags & 1 != 0;
                 let pkt_data = std::slice::from_raw_parts(data_ptr, data_size);
+                // VideoToolbox/libavcodec does not consistently preserve
+                // AV_PKT_FLAG_KEY for every backend. The NAL unit is the
+                // authoritative signal needed by the candidate-capture gate.
+                let is_key = (*self.packet).flags & 1 != 0
+                    || crate::webrtc::video_toolbox::is_keyframe(pkt_data)
+                    // The first output follows an explicit IDR request, but
+                    // some VideoToolbox versions omit AV_PKT_FLAG_KEY and
+                    // use length-prefixed NALs that the Annex-B probe cannot
+                    // inspect. Treat that one packet as the startup IDR.
+                    || !self.emitted_keyframe;
+                if is_key {
+                    self.emitted_keyframe = true;
+                }
 
                 let mut out = Vec::with_capacity(self.sps_pps.len() + pkt_data.len());
                 if is_key {

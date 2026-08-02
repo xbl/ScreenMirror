@@ -759,10 +759,20 @@ pub fn spawn_video_capture_loop(
                         }
                     },
                 };
-                if encoder.is_none() {
+                let rgba_dimensions = (rgba.width(), rgba.height());
+                if encoder
+                    .as_ref()
+                    .map(|value| value.dimensions() != rgba_dimensions)
+                    .unwrap_or(true)
+                {
                     let kbps =
-                        capture_bitrate_kbps(dimensions.0, dimensions.1, fps, target.quality);
-                    match VideoEncoder::new(dimensions.0, dimensions.1, fps.max(1), kbps) {
+                        capture_bitrate_kbps(rgba_dimensions.0, rgba_dimensions.1, fps, target.quality);
+                    match VideoEncoder::new(
+                        rgba_dimensions.0,
+                        rgba_dimensions.1,
+                        fps.max(1),
+                        kbps,
+                    ) {
                         Ok(value) => encoder = Some(value),
                         Err(error) => {
                             tracing::warn!("video encoder initialization failed: {error}");
@@ -794,6 +804,13 @@ pub fn spawn_video_capture_loop(
                         encoder_sink(encoded);
                     }
                 }
+                Err(error) if error.starts_with("expected ") => {
+                    tracing::error!("H.264 encode invariant violation: {error}")
+                }
+                // VideoToolbox can legitimately have no packet during its
+                // startup delay. This is not an encode failure; the next
+                // captured frame will drain the delayed packet.
+                Err(error) if error == "encoder buffering" => {}
                 Err(error) => tracing::warn!("H.264 encode error: {error}"),
             }
         }
@@ -894,6 +911,7 @@ pub fn spawn_video_capture_loop(
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
         let mut screenkit_consecutive_timeouts = 0_u8;
         let mut frames: u32 = 0;
+        let mut unavailable_source_errors = 0_u8;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
             let frame_index = frames;
             let capture_started = std::time::Instant::now();
@@ -978,6 +996,7 @@ pub fn spawn_video_capture_loop(
             }
             match captured {
                 Ok(frame) => {
+                    unavailable_source_errors = 0;
                     frames = frames.wrapping_add(1);
                     let (slot, wake) = &*frame_slot;
                     match slot.lock() {
@@ -986,6 +1005,18 @@ pub fn spawn_video_capture_loop(
                             wake.notify_one();
                         }
                         Err(_) => break,
+                    }
+                }
+                Err(error) if error.contains("source") && error.contains("no longer available") => {
+                    unavailable_source_errors = unavailable_source_errors.saturating_add(1);
+                    if unavailable_source_errors == 1 {
+                        tracing::warn!("capture stopped: {error}");
+                    }
+                    // A closed window cannot become valid again by polling the
+                    // same native ID. Stop this producer so the host can
+                    // release it and the user can choose a new source.
+                    if unavailable_source_errors >= 3 {
+                        break;
                     }
                 }
                 Err(error) => tracing::warn!("capture error: {error}"),
