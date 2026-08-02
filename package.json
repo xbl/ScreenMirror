@@ -21,7 +21,7 @@
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "prepare": "husky",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri dev --features screenkit",
     "tauri:build": "tauri build",
     "tauri:dev:screenkit": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri dev --features screenkit",
     "tauri:build:screenkit": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri build --features screenkit",

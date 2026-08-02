@@ -72,6 +72,38 @@ fn accept_tray_click() -> bool {
     true
 }
 
+fn update_tray_for_count<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, count: usize) {
+    let state = tray_state_for_count(count);
+    match tray_icon(state) {
+        Ok(icon) => {
+            #[cfg(target_os = "macos")]
+            let icon_result = tray.set_icon_with_as_template(Some(icon), true);
+            #[cfg(not(target_os = "macos"))]
+            let icon_result = tray.set_icon(Some(icon));
+
+            if let Err(error) = icon_result {
+                tracing::warn!(
+                    "failed to update tray icon (count={count}, state={state:?}): {error}"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                "failed to decode tray icon (count={count}, state={state:?}): {error}"
+            );
+        }
+    }
+
+    let title: Option<String> = if count == 0 {
+        None
+    } else {
+        Some(count.to_string())
+    };
+    if let Err(error) = tray.set_title(title) {
+        tracing::warn!("failed to update tray title (count={count}, state={state:?}): {error}");
+    }
+}
+
 pub mod commands;
 pub mod icons;
 pub mod network;
@@ -194,6 +226,7 @@ pub fn run() {
             commands::get_capture_source_preview,
             commands::get_capture_target,
             commands::open_source_picker_window,
+            commands::close_source_picker_window,
             commands::set_capture_target,
         ])
         .setup(move |app| {
@@ -239,31 +272,7 @@ pub fn run() {
                     let count = devices_for_tray.lock().get_devices().len();
                     if previous != Some(count) {
                         if let Some(tray) = app_handle.tray_by_id("screenmirror-tray") {
-                            let state = tray_state_for_count(count);
-                            match tray_icon(state) {
-                                Ok(icon) => {
-                                    #[cfg(target_os = "macos")]
-                                    let icon_result = tray.set_icon_with_as_template(Some(icon), true);
-                                    #[cfg(not(target_os = "macos"))]
-                                    let icon_result = tray.set_icon(Some(icon));
-
-                                    if let Err(error) = icon_result {
-                                        tracing::warn!("failed to update tray icon: {error}");
-                                    }
-                                }
-                                Err(error) => {
-                                    tracing::warn!("failed to decode tray icon: {error}");
-                                }
-                            }
-
-                            let title_result = if count == 0 {
-                                tray.set_title(None::<&str>)
-                            } else {
-                                tray.set_title(Some(count.to_string()))
-                            };
-                            if let Err(error) = title_result {
-                                tracing::warn!("failed to update tray title: {error}");
-                            }
+                            update_tray_for_count(&tray, count);
                         }
                         previous = Some(count);
                     }

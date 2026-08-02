@@ -1,7 +1,7 @@
 <template>
   <section class="source-picker" :class="{ 'source-picker-standalone': standalone }" aria-labelledby="source-picker-title">
     <template v-if="standalone">
-      <header class="sp-standalone-head">
+      <header class="sp-standalone-head" data-tauri-drag-region>
         <button v-if="pickerStep === 'windows'" class="sp-back" type="button" :aria-label="t('source.back')" @click="pickerStep = 'types'">
           <span aria-hidden="true">&#8249;</span>
           {{ t('source.back') }}
@@ -14,7 +14,6 @@
       <div v-if="loading && !sources.length" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
 
       <template v-else-if="pickerStep === 'types'">
-        <p class="sp-question">{{ t('source.chooseType') }}</p>
         <div class="sp-type-grid">
           <button
             v-if="primaryScreen"
@@ -112,7 +111,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
 import { api, type CaptureSourceInfo, type CaptureTarget } from '../utils/api';
@@ -151,9 +151,13 @@ function openPicker() { if (props.externalChooser) void api.openSourcePickerWind
 async function closePicker() {
   if (!props.standalone) return;
   try {
-    await getCurrentWindow().close();
+    await api.closeSourcePickerWindow();
   } catch {
-    window.close();
+    try {
+      await getCurrentWindow().close();
+    } catch {
+      window.close();
+    }
   }
 }
 
@@ -176,7 +180,9 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
   }
 }
 async function selectAndClose(source: CaptureSourceInfo) {
-  if (await selectSource(source)) await closePicker();
+  const closing = closePicker();
+  await selectSource(source);
+  await closing;
 }
 
 function refreshPreviews(available: CaptureSourceInfo[], generation: number, forceRefresh: boolean) {
@@ -217,21 +223,32 @@ async function changeQuality(event: Event) {
 }
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape' && props.standalone) closePicker(); }
 
-onMounted(() => { void refreshSources(); window.addEventListener('keydown', onKeydown); });
+async function resizePickerWindow(step: PickerStep) {
+  if (!props.standalone) return;
+  const pickerWindow = getCurrentWindow();
+  if (typeof pickerWindow.setSize !== 'function') return;
+  await nextTick();
+  const height = step === 'types'
+    ? 430
+    : Math.min(760, Math.max(620, 200 + orderedWindows.value.length * 82));
+  await pickerWindow.setSize(new LogicalSize(720, height));
+}
+
+onMounted(() => { void refreshSources(); void resizePickerWindow('types'); window.addEventListener('keydown', onKeydown); });
+watch([pickerStep, orderedWindows], ([step]) => { void resizePickerWindow(step); }, { flush: 'post' });
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <style scoped>
 .source-picker { display: flex; flex-direction: column; gap: 16px; padding: 16px; color: var(--text); background: var(--surface); }
-.source-picker-standalone { min-height: 100vh; padding: 38px 42px 26px; background: var(--surface); }
+.source-picker-standalone { min-height: 100vh; padding: 24px 34px 18px; background: var(--surface); }
 .sp-standalone-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 34px; }
 .sp-standalone-head h1 { color: var(--text-strong); font-family: var(--font-body); font-size: clamp(20px, 3vw, 28px); font-weight: 650; text-align: center; }
 .sp-head-spacer { min-width: 1px; }
 .sp-back { display: inline-flex; align-items: center; gap: 5px; justify-self: start; padding: 5px 8px; color: var(--muted); border-radius: var(--radius-sm); }
 .sp-back:hover { color: var(--text-strong); background: var(--surface-2); }
 .sp-back span { font-size: 23px; line-height: .7; }
-.sp-question { margin-top: 16px; color: var(--muted); font-size: 13px; text-align: center; }
-.sp-type-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 6px 0 auto; }
+.sp-type-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 8px 0 auto; }
 .sp-type-card { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 12px; text-align: center; border: 1px solid transparent; border-radius: 16px; background: var(--surface-2); transition: transform var(--motion) ease, border-color var(--motion) ease, background var(--motion) ease; }
 .sp-type-card:hover { border-color: var(--accent); background: var(--surface-3); transform: translateY(-2px); }
 .sp-type-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-line); }
@@ -251,7 +268,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 .sp-list-toolbar { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; color: var(--muted); font-size: 13px; }
 .sp-refresh, .sp-change { padding: 6px 8px; color: var(--accent); font-weight: 600; border-radius: var(--radius-sm); }
 .sp-refresh:hover, .sp-change:hover { background: var(--accent-dim); }
-.sp-window-list { display: grid; gap: 10px; margin-top: 8px; overflow: auto; }
+.sp-window-list { display: grid; gap: 10px; max-height: 500px; margin-top: 8px; overflow: auto; }
 .sp-window-card { position: relative; display: flex; align-items: center; gap: 14px; min-height: 72px; padding: 10px 14px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
 .sp-window-card:hover, .sp-window-card.selected { border-color: var(--accent); background: var(--surface-3); }
 .sp-window-thumb { display: grid; width: 56px; height: 44px; flex: 0 0 56px; place-items: center; border-radius: 7px; background: #2b323c; }
@@ -260,7 +277,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 .sp-window-copy strong { overflow: hidden; color: var(--text-strong); text-overflow: ellipsis; white-space: nowrap; }
 .sp-window-copy small { color: var(--muted); font-size: 12px; }
 .sp-check { color: var(--accent); font-size: 18px; }
-.sp-footer { display: flex; justify-content: flex-end; margin-top: 14px; padding-top: 18px; border-top: var(--line); }
+.sp-footer { display: flex; justify-content: flex-end; margin-top: 10px; padding-top: 12px; border-top: var(--line); }
 .sp-cancel { min-width: 92px; padding: 9px 18px; color: var(--text-strong); border-radius: var(--radius-md); background: var(--surface-3); }
 .sp-cancel:hover { background: var(--accent-dim); }
 .sp-head, .sp-current, .sp-quality { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

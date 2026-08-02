@@ -275,8 +275,8 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("index.html?source-picker=1".into()),
     )
     .title("Screenmirror")
-    .inner_size(720.0, 680.0)
-    .min_inner_size(560.0, 520.0)
+    .inner_size(720.0, 430.0)
+    .min_inner_size(560.0, 400.0)
     .resizable(false)
     // The picker owns its chrome so it can match the AirPlay-style layout.
     .decorations(false)
@@ -285,6 +285,14 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
     .visible(true)
     .build()
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn close_source_picker_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("source-picker") {
+        window.close().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

@@ -51,6 +51,7 @@ export const api = {
     invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh }),
   getCaptureTarget: () => invoke<CaptureTargetState | null>('get_capture_target'),
   openSourcePickerWindow: () => invoke<void>('open_source_picker_window'),
+  closeSourcePickerWindow: () => invoke<void>('close_source_picker_window'),
   closeTrayPanel: () => invoke<void>('close_tray_panel'),
   setCaptureTarget: (args: CaptureTarget) =>
     invoke<void>('set_capture_target', { args }),

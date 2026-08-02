@@ -11,6 +11,10 @@ const ROOT = path.resolve(__dirname, '..');
 const ICON_DIR = path.join(ROOT, 'src-tauri', 'icons');
 const HTML = path.join(__dirname, 'build-icon.html');
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const ICNS_SIGNATURE = Buffer.from('icns', 'ascii');
+const ICO_SIGNATURE = Buffer.from([0x00, 0x00, 0x01, 0x00]);
+const ICNS_OUTPUT = 'icon.icns';
+const ICO_OUTPUT = 'icon.ico';
 const VIEWS = ['app-icon', 'tray-disconnected', 'tray-connected'];
 
 export const OUTPUTS = [
@@ -51,6 +55,25 @@ function checkOutputs() {
         continue;
       }
       console.log(`OK ${name}: ${dimensions.width}x${dimensions.height}`);
+    } catch (error) {
+      console.error(`FAIL ${name}: ${error.message}`);
+      valid = false;
+    }
+  }
+
+  for (const { name, signature } of [
+    { name: ICNS_OUTPUT, signature: ICNS_SIGNATURE },
+    { name: ICO_OUTPUT, signature: ICO_SIGNATURE },
+  ]) {
+    const outputPath = path.join(ICON_DIR, name);
+    try {
+      const buffer = fs.readFileSync(outputPath);
+      if (!buffer.subarray(0, signature.length).equals(signature)) {
+        console.error(`FAIL ${name}: missing ${signature.toString('hex')} magic header`);
+        valid = false;
+        continue;
+      }
+      console.log(`OK ${name}: magic header ${signature.toString('hex')}`);
     } catch (error) {
       console.error(`FAIL ${name}: ${error.message}`);
       valid = false;
@@ -172,6 +195,46 @@ async function generateOutputs() {
     }
   } finally {
     await browser.close();
+  }
+
+  // After PNG generation, delegate to the project-local Tauri CLI to produce
+  // the platform icon assets (icon.icns, icon.ico, etc.) from the canonical
+  // icon.png. This keeps a single source of truth and avoids the bundler
+  // failing with `No matching IconType` from a 1024×1024 non-retina source.
+  await generatePlatformIcons();
+}
+
+function findTauriCli() {
+  const localBin = path.join(
+    ROOT,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'tauri.cmd' : 'tauri',
+  );
+  if (fs.existsSync(localBin)) {
+    return localBin;
+  }
+  throw new Error(
+    'Could not find the Tauri CLI binary. Did you forget to run `npm install`?',
+  );
+}
+
+async function generatePlatformIcons() {
+  const { spawn } = await import('node:child_process');
+  const tauriCli = findTauriCli();
+  const sourceIcon = path.join(ICON_DIR, 'icon.png');
+  const { execPath } = process;
+  // The Tauri CLI is a NAPI binary; run it via the local Node binary so the
+  // icon generation stays reproducible from `npm run icons`.
+  const child = spawn(execPath, [tauriCli, 'icon', sourceIcon, '--output', ICON_DIR], {
+    stdio: 'inherit',
+  });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code ?? 1));
+  });
+  if (exitCode !== 0) {
+    throw new Error(`tauri icon exited with code ${exitCode}`);
   }
 }
 
