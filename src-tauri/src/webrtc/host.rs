@@ -972,6 +972,9 @@ impl HostPeer {
                     Err(_) => break 'outer,
                 }
             }
+            if subscribed {
+                shared_capture.unsubscribe(&connection_id);
+            }
         });
         Ok(())
     }
