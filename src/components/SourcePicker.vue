@@ -340,7 +340,6 @@ onBeforeUnmount(() => {
 .sp-window-backdrop { width: 69%; height: 54%; transform: translate(-10%, -10%); opacity: .65; }
 .sp-window-front { width: 62%; height: 68%; transform: translate(13%, 11%); background: var(--selected); box-shadow: 0 5px 14px rgb(0 0 0 / 18%); }
 .sp-type-extended { background: var(--control); }
-.sp-type-extended::after { position: absolute; right: 9%; bottom: 8%; width: 34%; height: 9%; border-radius: 50%; background: var(--accent); content: ''; opacity: .65; }
 .sp-list-toolbar { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; color: var(--muted); font-size: 13px; }
 .sp-refresh, .sp-change { padding: 6px 8px; color: var(--accent); font-weight: 600; border-radius: var(--radius-sm); }
 .sp-refresh:hover, .sp-change:hover { background: var(--accent-dim); }
