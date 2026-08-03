@@ -215,8 +215,6 @@ pub fn run() {
             commands::relaunch_app,
             commands::exit_app,
             commands::get_connected_devices,
-            commands::disconnect_device,
-            commands::disconnect_all_devices,
             commands::is_viewer_slot_available,
             commands::create_waiting_session,
             commands::reset_waiting_session,

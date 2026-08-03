@@ -62,8 +62,6 @@ export default {
   },
   devices: {
     title: 'Connected devices',
-    disconnect: 'Disconnect',
-    disconnectAll: 'Disconnect all',
     none: 'No devices connected.',
     approve: 'Allow',
     deny: 'Deny',

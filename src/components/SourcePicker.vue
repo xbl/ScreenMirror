@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .source-picker { display: flex; flex-direction: column; gap: 16px; padding: 16px; color: var(--text); background: var(--surface); }
-.source-picker-standalone { min-height: 100vh; padding: 24px 34px 18px; background: var(--surface); }
+.source-picker-standalone { min-width: 0; min-height: 100vh; padding: 24px 34px 18px; overflow-x: hidden; background: var(--surface); }
 .sp-standalone-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 34px; }
 .sp-standalone-head h1 { color: var(--text-strong); font-family: var(--font-body); font-size: clamp(20px, 3vw, 28px); font-weight: 650; text-align: center; }
 .sp-head-spacer { min-width: 1px; }
@@ -282,12 +282,12 @@ onBeforeUnmount(() => {
 .sp-list-toolbar { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; color: var(--muted); font-size: 13px; }
 .sp-refresh, .sp-change { padding: 6px 8px; color: var(--accent); font-weight: 600; border-radius: var(--radius-sm); }
 .sp-refresh:hover, .sp-change:hover { background: var(--accent-dim); }
-.sp-window-list { display: grid; gap: 10px; max-height: 500px; margin-top: 8px; overflow: auto; }
-.sp-window-card { position: relative; display: flex; align-items: center; gap: 14px; min-height: 72px; padding: 10px 14px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
+.sp-window-list { display: grid; gap: 10px; min-width: 0; margin-top: 8px; }
+.sp-window-card { position: relative; display: flex; align-items: center; gap: 14px; min-width: 0; max-width: 100%; min-height: 72px; padding: 10px 14px; overflow: hidden; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
 .sp-window-card:hover, .sp-window-card.selected { border-color: var(--accent); background: var(--surface-3); }
 .sp-window-thumb { display: grid; width: 56px; height: 44px; flex: 0 0 56px; place-items: center; border-radius: 7px; background: #2b323c; }
 .sp-window-icon { width: 28px; height: 21px; border: 2px solid var(--accent); border-radius: 4px; box-shadow: -5px 5px 0 -1px #2b323c, -5px 5px 0 1px var(--accent); }
-.sp-window-copy { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-window-copy { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
 .sp-window-copy strong { overflow: hidden; color: var(--text-strong); text-overflow: ellipsis; white-space: nowrap; }
 .sp-window-copy small { color: var(--muted); font-size: 12px; }
 .sp-check { color: var(--accent); font-size: 18px; }

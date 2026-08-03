@@ -121,16 +121,6 @@ pub fn get_connected_devices(state: State<'_, CommandState>) -> Vec<Device> {
 }
 
 #[tauri::command]
-pub fn disconnect_device(state: State<'_, CommandState>, id: String) -> bool {
-    state.devices.lock().release_device(&id)
-}
-
-#[tauri::command]
-pub fn disconnect_all_devices(state: State<'_, CommandState>) {
-    state.devices.lock().release_all();
-}
-
-#[tauri::command]
 pub fn is_viewer_slot_available(state: State<'_, CommandState>) -> bool {
     state.devices.lock().is_slot_available()
 }

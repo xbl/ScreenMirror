@@ -62,8 +62,6 @@ export default {
   },
   devices: {
     title: '已连接设备',
-    disconnect: '断开',
-    disconnectAll: '断开全部',
     none: '暂无设备连接。',
     approve: '允许',
     deny: '拒绝',

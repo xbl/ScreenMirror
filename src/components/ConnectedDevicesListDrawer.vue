@@ -15,16 +15,8 @@
               <span class="drw-id">{{ d.ip }}</span>
               <span class="drw-sub">{{ d.os }} · {{ d.browser }}</span>
             </div>
-            <button class="drw-action" @click="disconnect(d.id)">
-              {{ t('devices.disconnect') }}
-            </button>
           </li>
         </ul>
-        <footer v-if="devices.length > 0" class="drw-foot">
-          <button class="drw-action drw-action--all" @click="disconnectAll">
-            {{ t('devices.disconnectAll') }}
-          </button>
-        </footer>
       </aside>
     </div>
   </Teleport>
@@ -47,24 +39,6 @@ async function refresh() {
     devices.value = await api.getConnectedDevices();
   } catch {
     devices.value = [];
-  }
-}
-
-async function disconnect(id: string) {
-  try {
-    await api.disconnectDevice(id);
-    await refresh();
-  } catch {
-    /* ignore */
-  }
-}
-
-async function disconnectAll() {
-  try {
-    await api.disconnectAllDevices();
-    await refresh();
-  } catch {
-    /* ignore */
   }
 }
 
@@ -183,36 +157,6 @@ watch(
 .drw-sub {
   font-size: var(--fs-12);
   color: var(--muted);
-}
-
-.drw-action {
-  padding: 6px 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-size: var(--fs-13);
-  background: transparent;
-  transition:
-    background var(--motion) ease,
-    border-color var(--motion) ease;
-}
-
-.drw-action:hover {
-  background: var(--surface-2);
-}
-
-.drw-action--all {
-  width: 100%;
-  margin-top: var(--sp-4);
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.drw-action--all:hover {
-  background: var(--danger-dim);
-}
-
-.drw-foot {
-  margin-top: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
