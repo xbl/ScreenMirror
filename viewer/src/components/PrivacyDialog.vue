@@ -25,24 +25,27 @@ const { t } = useI18n();
 .privacy-dialog {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: color-mix(in srgb, var(--canvas) 64%, transparent);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
 }
 .card {
-  background: white;
+  background: var(--group);
   padding: 24px;
-  border-radius: 8px;
+  border: var(--line);
+  border-radius: var(--radius-lg);
   max-width: 520px;
 }
 button {
-  background: #137cbd;
+  background: var(--accent);
   color: white;
   border: none;
-  padding: 8px 24px;
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   margin-top: 12px;
 }

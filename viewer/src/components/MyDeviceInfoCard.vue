@@ -20,20 +20,20 @@ const { t } = useI18n();
 
 <style scoped>
 .device-card {
-  background: white;
+  background: var(--group);
   padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #eee;
+  border-radius: var(--radius-lg);
+  border: var(--line);
 }
 .ip {
-  background: #00f99273;
+  background: var(--accent-dim);
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 16px;
+  border-radius: var(--radius-sm);
   display: inline-block;
 }
 .hint {
-  color: #5c7080;
+  color: var(--muted);
   font-size: 12px;
   margin-top: 8px;
 }

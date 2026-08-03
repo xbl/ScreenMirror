@@ -14,6 +14,11 @@
       @error="onVideoError"
     />
 
+    <div v-if="status === 'streaming'" class="player-streaming" role="status">
+      <span class="player-status-dot" aria-hidden="true" />
+      {{ t('player.streaming') }}
+    </div>
+
     <div v-if="status !== 'streaming'" class="player-center">
       <div v-if="noFrames" class="player-disconnected" role="alert">
         <p class="player-center-title">{{ t('player.noFrames') }}</p>
@@ -231,7 +236,7 @@ onBeforeUnmount(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #000;
+  background: var(--canvas);
 }
 
 .frame {
@@ -239,7 +244,7 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 0;
   object-fit: contain;
-  background: black;
+  background: var(--canvas);
   cursor: pointer;
 }
 
@@ -262,11 +267,12 @@ onBeforeUnmount(() => {
 .player-center-title {
   margin: 0;
   font-size: 14px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .spinner {
-  color: var(--muted);
+  color: var(--accent);
   animation: spin 0.9s linear infinite;
 }
 
@@ -291,18 +297,41 @@ onBeforeUnmount(() => {
 
 .player-reconnect {
   background: var(--accent);
-  color: #0a1413;
+  color: #fff;
   border: none;
-  padding: 8px 20px;
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--motion-fast) ease-out;
 }
 
 .player-reconnect:hover {
-  background: #a8efe4;
+  background: var(--accent-strong);
 }
+
+.player-streaming {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(16px);
+  font-size: var(--fs-12);
+  opacity: .86;
+  pointer-events: none;
+}
+
+.player-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent); }
+
+@media (prefers-reduced-motion: reduce) { .player-streaming { transition: none; } }
 
 </style>

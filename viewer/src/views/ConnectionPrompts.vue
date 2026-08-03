@@ -37,10 +37,10 @@ const text = computed(() => prompts[props.step] ?? t('viewer.disconnected'));
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 12px;
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 32px;
+  padding: 24px;
   color: var(--text);
   background: var(--bg);
   text-align: center;
@@ -48,13 +48,13 @@ const text = computed(() => prompts[props.step] ?? t('viewer.disconnected'));
 .signal-mark {
   display: flex;
   align-items: end;
-  gap: 5px;
+  gap: 4px;
   height: 28px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .signal-mark span {
-  width: 5px;
-  border-radius: 999px;
+  width: 4px;
+  border-radius: 3px;
   background: var(--accent);
   animation: breathe 1.6s ease-in-out infinite;
 }
@@ -64,31 +64,34 @@ const text = computed(() => prompts[props.step] ?? t('viewer.disconnected'));
 .eyebrow {
   margin: 0;
   color: var(--accent);
-  font: 600 var(--fs-12)/1.2 var(--font-mono);
-  letter-spacing: 0.22em;
+  font: 650 var(--fs-12)/1.2 var(--font-body);
+  letter-spacing: .12em;
 }
 h1 {
   max-width: 360px;
   margin: 0;
   color: var(--text-strong);
   font-family: var(--font-display);
-  font-size: var(--fs-28);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0;
   line-height: 1.2;
 }
 button {
   margin-top: 16px;
-  padding: 10px 18px;
+  min-height: 32px;
+  padding: 6px 13px;
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--accent);
   font: 500 var(--fs-14)/1.2 var(--font-body);
   cursor: pointer;
-  transition: background var(--motion) ease, color var(--motion) ease;
+  transition: background var(--motion-fast) ease-out, color var(--motion-fast) ease-out;
 }
 button:hover {
   background: var(--accent);
-  color: #0a1413;
+  color: #fff;
 }
 @keyframes breathe {
   0%, 100% { opacity: 0.35; transform: scaleY(0.72); }
