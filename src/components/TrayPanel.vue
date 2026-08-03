@@ -247,8 +247,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 36px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 10px;
   color: var(--text);
   font-size: 12px;
   text-align: left;
