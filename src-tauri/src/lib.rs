@@ -230,6 +230,7 @@ pub fn run() {
             commands::open_source_picker_window,
             commands::close_source_picker_window,
             commands::set_capture_target,
+            commands::start_source_picker_drag,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

@@ -8,6 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   getCaptureSourcePreview: vi.fn(),
   getCaptureTarget: vi.fn(),
   setCaptureTarget: vi.fn(),
+  startSourcePickerDrag: vi.fn(),
 }));
 const windowMocks = vi.hoisted(() => ({ close: vi.fn() }));
 const eventMocks = vi.hoisted(() => ({ listen: vi.fn() }));
@@ -46,6 +47,7 @@ describe('SourcePicker', () => {
     apiMocks.getCaptureSourcePreview.mockResolvedValue('data:image/jpeg;base64,preview');
     apiMocks.getCaptureTarget.mockResolvedValue({ kind: 'screen', id: 0, sourceId: 'main-display', quality: 0.75 });
     apiMocks.setCaptureTarget.mockResolvedValue(undefined);
+    apiMocks.startSourcePickerDrag.mockResolvedValue(undefined);
     windowMocks.close.mockResolvedValue(undefined);
     eventMocks.listen.mockResolvedValue(vi.fn());
   });
@@ -68,6 +70,19 @@ describe('SourcePicker', () => {
     expect(wrapper.get('[data-source-type="screen"] strong').text()).toBe('Entire screen');
     expect(wrapper.get('[data-source-type="window"] strong').text()).toBe('Window or app');
     expect(wrapper.get('[data-source-type="extended"] strong').text()).toBe('Extended displays');
+  });
+
+  it('starts native dragging from the standalone title area without dragging the back button', async () => {
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    await wrapper.get('.sp-standalone-head').trigger('mousedown', { button: 0 });
+    expect(apiMocks.startSourcePickerDrag).toHaveBeenCalledOnce();
+
+    await openWindowChooser(wrapper);
+    apiMocks.startSourcePickerDrag.mockClear();
+    await wrapper.get('.sp-back').trigger('mousedown', { button: 0 });
+    expect(apiMocks.startSourcePickerDrag).not.toHaveBeenCalled();
   });
 
   it('selects the primary display and closes immediately', async () => {

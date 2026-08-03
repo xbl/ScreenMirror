@@ -294,6 +294,14 @@ pub fn close_source_picker_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn start_source_picker_drag(app: AppHandle) -> Result<(), String> {
+    app.get_webview_window("source-picker")
+        .ok_or_else(|| "source picker window not found".to_string())?
+        .start_dragging()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn close_tray_panel(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("tray-panel") {
         window.hide().map_err(|e| e.to_string())?;

@@ -1,8 +1,8 @@
 <template>
   <section class="source-picker" :class="{ 'source-picker-standalone': standalone }" aria-labelledby="source-picker-title">
     <template v-if="standalone">
-      <header class="sp-standalone-head" data-tauri-drag-region>
-        <button v-if="pickerStep === 'windows'" class="sp-back" type="button" :aria-label="t('source.back')" @click="pickerStep = 'types'">
+      <header class="sp-standalone-head" @mousedown.prevent="startWindowDrag">
+        <button v-if="pickerStep === 'windows'" class="sp-back" type="button" :aria-label="t('source.back')" @mousedown.stop @click="pickerStep = 'types'">
           <span aria-hidden="true">&#8249;</span>
           {{ t('source.back') }}
         </button>
@@ -154,6 +154,11 @@ function resolution(source: CaptureSourceInfo) { return t('source.resolution', {
 function qualityValue(value: Quality) { return { balanced: 0.5, high: 0.75, ultra: 1.0 }[value]; }
 function qualityName(value: number): Quality { return value >= 0.9 ? 'ultra' : value >= 0.65 ? 'high' : 'balanced'; }
 function openPicker() { if (props.externalChooser) void api.openSourcePickerWindow(); }
+function startWindowDrag(event: MouseEvent) {
+  event.preventDefault();
+  if (event.button !== 0) return;
+  void api.startSourcePickerDrag();
+}
 async function closePicker() {
   if (!props.standalone) return;
   try {
@@ -312,7 +317,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .source-picker { display: flex; flex-direction: column; gap: 16px; padding: 16px; color: var(--text); background: var(--surface); }
 .source-picker-standalone { min-width: 0; min-height: 100vh; padding: 24px 34px 18px; overflow-x: hidden; background: var(--surface); }
-.sp-standalone-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 34px; }
+.sp-standalone-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 34px; cursor: grab; user-select: none; }
+.sp-standalone-head:active { cursor: grabbing; }
 .sp-standalone-head h1 { color: var(--text-strong); font-family: var(--font-body); font-size: clamp(20px, 3vw, 28px); font-weight: 650; text-align: center; }
 .sp-head-spacer { min-width: 1px; }
 .sp-back { display: inline-flex; align-items: center; gap: 5px; justify-self: start; padding: 5px 8px; color: var(--muted); border-radius: var(--radius-sm); }
