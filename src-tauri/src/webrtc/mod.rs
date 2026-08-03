@@ -68,6 +68,7 @@ const PREVIEW_JPEG_QUALITY: u8 = 60;
 #[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 struct PreviewCacheKey {
+    source_kind: String,
     source_id: String,
     width: u32,
     height: u32,
@@ -166,14 +167,16 @@ fn preview_data_url(rgba: RgbaImage) -> Result<String, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_monitor_preview(
-    monitor: &xcap::Monitor,
+fn capture_source_preview(
     source_id: &str,
+    source_kind: &str,
     width: u32,
     height: u32,
     force_refresh: bool,
+    capture: impl FnOnce() -> Result<RgbaImage, String>,
 ) -> Option<String> {
     let key = PreviewCacheKey {
+        source_kind: source_kind.into(),
         source_id: source_id.into(),
         width,
         height,
@@ -190,15 +193,9 @@ fn capture_monitor_preview(
         return None;
     }
 
-    let capture = monitor
-        .capture_image()
-        .map_err(|error| error.to_string())
-        .and_then(|image| {
-            RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
-                .ok_or_else(|| "display preview has invalid image dimensions".into())
-        });
+    let capture = capture();
     if capture.is_err() {
-        tracing::debug!(source_id, "could not capture display preview");
+        tracing::debug!(source_id, source_kind, "could not capture source preview");
     }
     let preview = preview_from_capture_result(capture);
 
@@ -346,30 +343,44 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
 pub fn get_capture_source_preview(
     source_id: &str,
     force_refresh: bool,
+    source_kind: &str,
 ) -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
-        use xcap::Monitor;
+        use xcap::{Monitor, Window};
 
-        let monitor = Monitor::all()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|monitor| {
-                monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id)
-            });
-        let Some(monitor) = monitor else {
-            return Ok(None);
-        };
-        let width = monitor.width().unwrap_or(0);
-        let height = monitor.height().unwrap_or(0);
-
-        Ok(capture_monitor_preview(
-            &monitor,
-            source_id,
-            width,
-            height,
-            force_refresh,
-        ))
+        match source_kind {
+            "window" => {
+                let window = Window::all()
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .find(|window| window.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
+                let Some(window) = window else { return Ok(None); };
+                let width = window.width().unwrap_or(0);
+                let height = window.height().unwrap_or(0);
+                Ok(capture_source_preview(source_id, source_kind, width, height, force_refresh, || {
+                    window
+                        .capture_image()
+                        .map_err(|error| error.to_string())
+                        .and_then(|image| RgbaImage::from_raw(image.width(), image.height(), image.into_raw()).ok_or_else(|| "window preview has invalid image dimensions".into()))
+                }))
+            }
+            _ => {
+                let monitor = Monitor::all()
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .find(|monitor| monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
+                let Some(monitor) = monitor else { return Ok(None); };
+                let width = monitor.width().unwrap_or(0);
+                let height = monitor.height().unwrap_or(0);
+                Ok(capture_source_preview(source_id, source_kind, width, height, force_refresh, || {
+                    monitor
+                        .capture_image()
+                        .map_err(|error| error.to_string())
+                        .and_then(|image| RgbaImage::from_raw(image.width(), image.height(), image.into_raw()).ok_or_else(|| "display preview has invalid image dimensions".into()))
+                }))
+            }
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -412,6 +423,21 @@ pub struct CapturedFrame {
 
 fn normalize_encoder_dimensions(width: u32, height: u32) -> (u32, u32) {
     (width & !1, height & !1)
+}
+
+/// Choose an even capture size while preserving the source aspect ratio.
+/// ScreenCaptureKit performs this scale on the capture path, before the
+/// per-frame BGRA copy reaches the CPU.
+#[cfg(any(test, all(target_os = "macos", feature = "screenkit")))]
+fn capture_dimensions(width: u32, height: u32, max_dim: u32) -> (u32, u32) {
+    let max_dim = max_dim.max(2);
+    if width <= max_dim && height <= max_dim {
+        return normalize_encoder_dimensions(width.max(2), height.max(2));
+    }
+    let scale = max_dim as f64 / width.max(height) as f64;
+    let scaled_width = ((width as f64 * scale).round() as u32).max(2);
+    let scaled_height = ((height as f64 * scale).round() as u32).max(2);
+    normalize_encoder_dimensions(scaled_width, scaled_height)
 }
 
 fn resize_rgba_nearest(rgba: &RgbaImage, width: u32, height: u32) -> RgbaImage {
@@ -868,7 +894,7 @@ pub fn spawn_video_capture_loop(
             None
         };
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen)
+        let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen | CaptureKind::Window)
             && std::env::var("SCREENMIRROR_USE_IOSURFACE")
                 .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
                 // ScreenCaptureKit delivers frames at the requested cadence;
@@ -1069,7 +1095,7 @@ pub struct CaptureHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_preview_request, capture_bitrate_kbps, finish_preview_request,
+        begin_preview_request, capture_bitrate_kbps, capture_dimensions, finish_preview_request,
         is_shareable_window, legacy_capture_source_id, next_screenkit_timeout_count,
         normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, preview_dimensions,
         preview_from_capture_result, profile_fps, profile_max_dim, select_source_index,
@@ -1101,6 +1127,13 @@ mod tests {
         assert_eq!(profile_max_dim(0.5), 1280);
         assert_eq!(profile_max_dim(0.75), 1920);
         assert_eq!(profile_max_dim(1.0), 3840);
+    }
+
+    #[test]
+    fn capture_dimensions_scale_retina_inputs_once() {
+        assert_eq!(capture_dimensions(3024, 1964, 1920), (1920, 1246));
+        assert_eq!(capture_dimensions(1920, 1080, 1920), (1920, 1080));
+        assert_eq!(capture_dimensions(1511, 981, 1920), (1510, 980));
     }
 
     #[test]
@@ -1229,6 +1262,7 @@ mod tests {
     #[test]
     fn forced_preview_refresh_evicts_old_cache_after_capture_failure() {
         let key = PreviewCacheKey {
+            source_kind: "screen".into(),
             source_id: "display-1".into(),
             width: 1920,
             height: 1080,
@@ -1256,6 +1290,7 @@ mod tests {
     #[test]
     fn preview_captures_are_single_flight_per_source() {
         let key = PreviewCacheKey {
+            source_kind: "screen".into(),
             source_id: "display-1".into(),
             width: 1920,
             height: 1080,

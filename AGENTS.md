@@ -104,6 +104,30 @@ screenmirror/
   type so consumers can pass either `ref(null)` or `{ value: null }` as the
   fallback.
 
+### SourcePicker state and previews
+
+- `CommandState.capture_target` is the single source of truth for the active
+  share target. Tauri events update the tray immediately; while the tray is
+  mounted, a lightweight target-only reconciliation is required as a fallback
+  for a missed cross-WebView event. It must not enumerate sources unless the
+  target has actually changed.
+- `set_capture_target` must finish the target switch before the standalone
+  picker closes, then emit `capture-target-changed` with the complete
+  `CaptureTargetState`. The embedded tray `SourcePicker` refreshes its card
+  from that event.
+- `SourcePicker` has two instances: the embedded tray card and the standalone
+  picker window. They must not synchronize by copying refs or guessing from
+  stale local state. Use Tauri events for cross-window changes and the command
+  state for restoration.
+- Preview requests must include the source kind. Display and window/App
+  previews use separate cache keys; never show a display preview for a window
+  source. During a pending request, show `source.previewLoading`; use
+  `source.noPreview` only after the bounded capture attempt has failed.
+- A source-selection change is verified with a real Tauri flow: open the tray,
+  select an App, confirm the target name and preview change in the tray card,
+  then switch back to the primary display. Vue tests alone do not cover the
+  cross-WebView, xcap, or window-close ordering involved here.
+
 ### Rust (Tauri)
 
 - Bundle id is **`dev.screenmirror.app`** (from `src-tauri/tauri.conf.json`).
@@ -178,6 +202,12 @@ timer rather than treating a successful WebRTC handshake as proof of quality.
 Always rebuild `viewer/dist/` before trusting headless output. If Vite/Rollup
 fails because an optional native dependency is missing, treat any existing
 `viewer/dist/` as stale and do not claim the new viewer code was verified.
+
+For source-picker changes, also run a real macOS/Tauri UI check. The minimum
+scenario is: open the tray, verify the primary display preview, choose an App
+in the standalone picker, verify that the tray card changes to that App and
+its preview, then switch back to the primary display. Do not claim this flow
+is verified from Vue unit tests alone.
 
 The pre-existing warnings, in case a reviewer flags them as new:
 

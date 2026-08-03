@@ -45,8 +45,8 @@ export const api = {
   getPendingDevice: () => invoke<Device | null>('get_pending_device'),
   setDeviceConnectedStatus: () => invoke<void>('set_device_connected_status'),
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
-  getCaptureSourcePreview: (sourceId: string, forceRefresh: boolean) =>
-    invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh }),
+  getCaptureSourcePreview: (sourceId: string, forceRefresh: boolean, sourceKind: CaptureSourceKind) =>
+    invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh, sourceKind }),
   getCaptureTarget: () => invoke<CaptureTargetState | null>('get_capture_target'),
   openSourcePickerWindow: () => invoke<void>('open_source_picker_window'),
   closeSourcePickerWindow: () => invoke<void>('close_source_picker_window'),

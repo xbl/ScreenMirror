@@ -30,8 +30,8 @@ const i18n = createI18n({
   } } },
 });
 
-function mountPicker(standalone = false) {
-  return mount(SourcePicker, { props: { standalone }, global: { plugins: [i18n] } });
+function mountPicker(standalone = false, externalChooser = false) {
+  return mount(SourcePicker, { props: { standalone, externalChooser }, global: { plugins: [i18n] } });
 }
 
 async function openWindowChooser(wrapper: ReturnType<typeof mountPicker>) {
@@ -104,6 +104,19 @@ describe('SourcePicker', () => {
     expect(windowMocks.close).toHaveBeenCalledOnce();
   });
 
+  it('changes the source before closing the standalone picker', async () => {
+    const calls: string[] = [];
+    apiMocks.setCaptureTarget.mockImplementation(async () => { calls.push('select'); });
+    windowMocks.close.mockImplementation(async () => { calls.push('close'); });
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    await wrapper.get('[data-source-type="extended"]').trigger('click');
+    await flushPromises();
+
+    expect(calls).toEqual(['select', 'close']);
+  });
+
   it('sends a stable window source ID without confusing colliding display IDs', async () => {
     const collidingWindow = { ...sources[2], sourceId: 'main-display', name: 'Terminal App' };
     apiMocks.enumerateCaptureSources.mockResolvedValue([...sources, collidingWindow]);
@@ -156,6 +169,49 @@ describe('SourcePicker', () => {
     await flushPromises();
 
     expect(wrapper.get('[data-source-type="screen"] img').attributes('src')).toBe('data:image/jpeg;base64,updated');
-    expect(apiMocks.getCaptureSourcePreview).toHaveBeenLastCalledWith('main-display', true);
+    expect(apiMocks.getCaptureSourcePreview).toHaveBeenLastCalledWith('main-display', true, 'screen');
+  });
+
+  it('refreshes the embedded card when the tray panel is opened', async () => {
+    const wrapper = mountPicker(false, true);
+    await flushPromises();
+    const openHandler = eventMocks.listen.mock.calls.find(([event]) => event === 'tray-panel-opened')?.[1];
+    expect(openHandler).toBeTypeOf('function');
+
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce(sources);
+    apiMocks.getCaptureTarget.mockResolvedValueOnce({ kind: 'screen', id: 1, sourceId: 'desk-display', quality: 0.75 });
+    apiMocks.getCaptureSourcePreview.mockImplementation((sourceId: string) => Promise.resolve(`preview:${sourceId}`));
+    await openHandler?.();
+    await flushPromises();
+
+    expect(wrapper.get('.sp-current-copy strong').text()).toBe('Studio Display');
+    expect(wrapper.get('.sp-current-preview img').attributes('src')).toBe('preview:desk-display');
+  });
+
+  it('refreshes the embedded card when the capture target changes', async () => {
+    const wrapper = mountPicker(false, true);
+    await flushPromises();
+    const targetHandler = eventMocks.listen.mock.calls.find(([event]) => event === 'capture-target-changed')?.[1];
+    expect(targetHandler).toBeTypeOf('function');
+
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([{ ...sources[2], sourceId: 'app-window', name: 'Notes App', preview: null }]);
+    apiMocks.getCaptureTarget.mockResolvedValueOnce({ kind: 'window', id: 0, sourceId: 'app-window', quality: 0.75 });
+    apiMocks.getCaptureSourcePreview.mockResolvedValueOnce('preview:app-window');
+    await targetHandler?.({ payload: { kind: 'window', id: 0, sourceId: 'app-window', quality: 0.75 } });
+    await flushPromises();
+
+    expect(wrapper.get('.sp-current-copy strong').text()).toBe('Notes App');
+    expect(wrapper.get('.sp-current-preview img').attributes('src')).toBe('preview:app-window');
+  });
+
+  it('updates the embedded card directly from a changed window target', async () => {
+    const wrapper = mountPicker(false, true);
+    await flushPromises();
+    const targetHandler = eventMocks.listen.mock.calls.find(([event]) => event === 'capture-target-changed')?.[1];
+
+    await targetHandler?.({ payload: { kind: 'window', id: 0, sourceId: 'terminal-window', quality: 0.75 } });
+    await flushPromises();
+
+    expect(wrapper.get('.sp-current-copy strong').text()).toBe('Terminal');
   });
 });

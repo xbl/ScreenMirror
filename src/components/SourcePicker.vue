@@ -101,7 +101,7 @@
       <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
       <div v-if="loading && !selectedSource" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
       <div v-else class="sp-current" data-testid="source-preview" aria-live="polite">
-        <div class="sp-current-preview"><img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" /><span v-else>{{ t('source.noPreview') }}</span></div>
+        <div class="sp-current-preview"><img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" /><span v-else>{{ previewLoading ? t('source.previewLoading') : t('source.noPreview') }}</span></div>
         <div class="sp-current-copy"><span class="sp-current-label">{{ t('source.current') }}</span><strong>{{ selectedSource?.name || t('source.noSources') }}</strong><small v-if="selectedSource">{{ resolution(selectedSource) }}</small></div>
         <button class="sp-change" type="button" @click="openPicker">{{ t('source.change') }}</button>
       </div>
@@ -116,7 +116,7 @@ import { LogicalSize } from '@tauri-apps/api/dpi';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
-import { api, type CaptureSourceInfo, type CaptureTarget } from '../utils/api';
+import { api, type CaptureSourceInfo, type CaptureTarget, type CaptureTargetState } from '../utils/api';
 
 type Quality = 'balanced' | 'high' | 'ultra';
 type PickerStep = 'types' | 'windows';
@@ -128,11 +128,14 @@ const selectedSource = ref<CaptureSourceInfo | null>(null);
 const quality = ref<Quality>('high');
 const error = ref('');
 const loading = ref(false);
+const previewLoading = ref(false);
 const pickerStep = ref<PickerStep>('types');
 let captureOperation = 0;
 let refreshGeneration = 0;
 let unlistenTrayOpened: UnlistenFn | undefined;
 let unlistenPickerOpened: UnlistenFn | undefined;
+let unlistenTargetChanged: UnlistenFn | undefined;
+let targetSyncTimer: number | undefined;
 
 const orderedKeys = ref<string[]>([]);
 const ordered = computed(() => {
@@ -176,6 +179,7 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
     if (operation !== captureOperation) return false;
     selectedSource.value = sources.value.find((item) => sourceKey(item) === sourceKey(source)) ?? source;
     quality.value = nextQuality;
+    previewLoading.value = !selectedSource.value.preview;
     return true;
   } catch {
     if (operation === captureOperation) error.value = t('source.errorSwitch');
@@ -183,37 +187,76 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
   }
 }
 async function selectAndClose(source: CaptureSourceInfo) {
-  const closing = closePicker();
-  await selectSource(source);
-  await closing;
+  const selected = await selectSource(source);
+  if (selected) await closePicker();
 }
 
-function refreshPreviews(available: CaptureSourceInfo[], generation: number, forceRefresh: boolean) {
-  for (const source of available.filter((item) => item.kind === 'screen')) {
-    void api.getCaptureSourcePreview(source.sourceId, forceRefresh).then((preview) => {
-      if (!preview || generation !== refreshGeneration) return;
-      sources.value = sources.value.map((item) => sourceKey(item) === sourceKey(source) ? { ...item, preview } : item);
-      if (selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) selectedSource.value = { ...source, preview };
-    });
+function refreshPreview(source: CaptureSourceInfo, generation: number, forceRefresh: boolean, attempt = 0) {
+  void api.getCaptureSourcePreview(source.sourceId, forceRefresh, source.kind).then((preview) => {
+    if (generation !== refreshGeneration) return;
+    if (!preview) {
+      if (attempt < 3) {
+        window.setTimeout(() => refreshPreview(source, generation, false, attempt + 1), 100);
+      } else if (selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) {
+        previewLoading.value = false;
+      }
+      return;
+    }
+    sources.value = sources.value.map((item) => sourceKey(item) === sourceKey(source) ? { ...item, preview } : item);
+    if (selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) {
+      selectedSource.value = { ...source, preview };
+      previewLoading.value = false;
+    }
+  }).catch(() => {
+    if (generation === refreshGeneration && selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) previewLoading.value = false;
+  });
+}
+function refreshPreviews(available: CaptureSourceInfo[], selected: CaptureSourceInfo | null, generation: number, forceRefresh: boolean) {
+  const previewSources = available.filter((item) => item.kind === 'screen');
+  if (selected?.kind === 'window') previewSources.push(selected);
+  for (const source of previewSources) {
+    refreshPreview(source, generation, forceRefresh);
   }
+}
+function updateCurrentSource(target: CaptureTargetState) {
+  const source = sources.value.find((item) => item.kind === target.kind && item.sourceId === target.sourceId);
+  if (!source) {
+    void refreshSources(true);
+    return;
+  }
+  selectedSource.value = source;
+  quality.value = qualityName(target.quality);
+  previewLoading.value = !source.preview;
+  const generation = ++refreshGeneration;
+  refreshPreview(source, generation, true);
+}
+async function syncCurrentSource() {
+  const target = await api.getCaptureTarget().catch(() => null);
+  if (!target || (selectedSource.value?.kind === target.kind && selectedSource.value.sourceId === target.sourceId && quality.value === qualityName(target.quality))) return;
+  updateCurrentSource(target);
 }
 async function refreshSources(forceRefresh = false) {
   const generation = ++refreshGeneration;
   loading.value = true;
+  if (!props.standalone) previewLoading.value = true;
   error.value = '';
   try {
     const available = await api.enumerateCaptureSources();
     if (generation !== refreshGeneration) return;
     sources.value = available;
     orderedKeys.value = orderedKeys.value.filter((key) => available.some((source) => sourceKey(source) === key));
-    refreshPreviews(available, generation, forceRefresh);
     const current = await api.getCaptureTarget().catch(() => null);
     const restored = current && available.find((source) => source.kind === current.kind && (current.sourceId ? source.sourceId === current.sourceId : source.id === `${current.kind}:${current.id}`));
-    if (restored) { selectedSource.value = restored; quality.value = qualityName(current.quality); }
+    if (restored) {
+      selectedSource.value = sources.value.find((source) => sourceKey(source) === sourceKey(restored)) ?? restored;
+      quality.value = qualityName(current.quality);
+      if (selectedSource.value.preview) previewLoading.value = false;
+    }
     else if (!selectedSource.value && !props.standalone) {
       const primary = available.find((source) => source.kind === 'screen' && source.isPrimary) ?? available.find((source) => source.kind === 'screen') ?? available[0];
       if (primary) await selectSource(primary);
     }
+    refreshPreviews(available, selectedSource.value, generation, forceRefresh);
   } catch {
     if (generation === refreshGeneration) error.value = t('source.errorEnumerate');
   } finally {
@@ -238,13 +281,17 @@ async function resizePickerWindow(step: PickerStep) {
 }
 
 onMounted(() => {
-  void refreshSources(props.standalone);
+  void refreshSources(props.externalChooser || props.standalone);
   void resizePickerWindow('types');
   window.addEventListener('keydown', onKeydown);
   if (props.externalChooser) {
     void listen('tray-panel-opened', () => refreshSources(true)).then((stop) => {
       unlistenTrayOpened = stop;
     });
+    void listen<CaptureTargetState>('capture-target-changed', ({ payload }) => updateCurrentSource(payload)).then((stop) => {
+      unlistenTargetChanged = stop;
+    });
+    targetSyncTimer = window.setInterval(() => { void syncCurrentSource(); }, 1000);
   }
   if (props.standalone) {
     void listen('source-picker-opened', () => refreshSources(true)).then((stop) => {
@@ -257,6 +304,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
   unlistenTrayOpened?.();
   unlistenPickerOpened?.();
+  unlistenTargetChanged?.();
+  if (targetSyncTimer) window.clearInterval(targetSyncTimer);
 });
 </script>
 

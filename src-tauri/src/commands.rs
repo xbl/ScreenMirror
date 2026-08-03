@@ -207,9 +207,14 @@ pub fn enumerate_capture_sources() -> Result<Vec<crate::webrtc::CaptureSourceInf
 pub async fn get_capture_source_preview(
     source_id: String,
     force_refresh: bool,
+    source_kind: Option<String>,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::webrtc::get_capture_source_preview(&source_id, force_refresh)
+        crate::webrtc::get_capture_source_preview(
+            &source_id,
+            force_refresh,
+            source_kind.as_deref().unwrap_or("screen"),
+        )
     })
     .await
     .map_err(|error| format!("capture source preview task failed: {error}"))?
@@ -224,7 +229,7 @@ pub struct CaptureTargetArgs {
     pub quality: Option<f32>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureTargetState {
     pub kind: String,
@@ -309,6 +314,7 @@ where
 #[tauri::command]
 pub fn set_capture_target(
     state: State<'_, CommandState>,
+    app: AppHandle,
     args: CaptureTargetArgs,
 ) -> Result<(), String> {
     let kind = match args.kind.as_str() {
@@ -322,6 +328,12 @@ pub fn set_capture_target(
         id: args.id,
         source_id: args.source_id,
         quality: args.quality.unwrap_or(0.75),
+    };
+    let target_event = CaptureTargetState {
+        kind: args.kind,
+        id: args.id,
+        source_id: target.source_id.clone(),
+        quality: target.quality,
     };
     let fps = crate::webrtc::profile_fps(target.quality);
     let _transaction = state.capture_target_switch_lock.lock();
@@ -347,6 +359,8 @@ pub fn set_capture_target(
         peer.commit_target_switch(prepared_target);
     }
     *state.capture_target.lock() = Some(target);
+    app.emit("capture-target-changed", target_event)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
