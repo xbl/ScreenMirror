@@ -1,0 +1,6 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #app { min-height: 100%; margin: 0; padding: 0; background: var(--canvas); color: var(--text); font-family: var(--font-body); font-size: var(--fs-15); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+button:active:not(:disabled) { transform: scale(.985); }
+::selection { color: var(--text-strong); background: var(--accent-dim); }

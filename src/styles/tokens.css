@@ -1,61 +1,36 @@
-/* Design tokens for the Screenmirror host UI.
- * Quiet console palette + a single signal-cyan accent that echoes the new
- * app icon's gradient. Type is three roles: display (Fraunces, serif),
- * body (system sans), mono (system mono).
- */
-
 :root {
-  color-scheme: dark;
-
-  /* Surface ladder — barely-there steps, no shadows. */
-  --bg: #0e1116;
-  --surface: #161a21;
-  --surface-2: #1d222b;
-  --surface-3: #242a35;
-
-  /* Hairline borders and subtle dividers. */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.12);
-
-  /* Text: warm bone, not pure white; muted for secondary info. */
-  --text: #e8e4dc;
-  --text-strong: #f7f4ee;
-  --muted: #8a8579;
-  --muted-2: #5d5952;
-
-  /* Accent: signal cyan, picked up from the icon mid-stop. */
-  --accent: #7be0d2;
-  --accent-strong: #a3ecdf;
-  --accent-dim: rgba(123, 224, 210, 0.12);
-  --accent-line: rgba(123, 224, 210, 0.32);
-
-  /* Functional. */
-  --danger: #e27d60;
-  --danger-dim: rgba(226, 125, 96, 0.12);
-  --warn: #e8c468;
-
-  /* Type stack. */
-  --font-display:
-    'Fraunces', 'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
-  --font-body:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI',
-    system-ui, sans-serif;
-  --font-mono:
-    'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
-
-  /* Modular scale 1.250. */
-  --fs-12: 0.75rem;
-  --fs-13: 0.8125rem;
-  --fs-14: 0.875rem;
-  --fs-15: 0.9375rem;
+  color-scheme: light;
+  --canvas: #f3efe9;
+  --surface: #faf8f4;
+  --group: #fffdfa;
+  --control: #ebe5dc;
+  --selected: #ffffff;
+  --text: #211e1a;
+  --text-strong: #171310;
+  --muted: #786f65;
+  --muted-2: #a39a90;
+  --border: rgba(62, 42, 25, .13);
+  --border-strong: rgba(62, 42, 25, .22);
+  --accent: #e96316;
+  --accent-strong: #cf5110;
+  --accent-dim: rgba(233, 99, 22, .11);
+  --accent-line: rgba(233, 99, 22, .34);
+  --success: #35a55b;
+  --danger: #c43f39;
+  --danger-dim: rgba(196, 63, 57, .11);
+  --warn: var(--accent);
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, monospace;
+  --fs-12: .75rem;
+  --fs-13: .8125rem;
+  --fs-14: .875rem;
+  --fs-15: .9375rem;
   --fs-16: 1rem;
   --fs-18: 1.125rem;
   --fs-22: 1.375rem;
   --fs-28: 1.75rem;
   --fs-36: 2.25rem;
-  --fs-48: 3rem;
-
-  /* Spacing scale (4px base). */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -64,28 +39,44 @@
   --sp-6: 24px;
   --sp-8: 32px;
   --sp-10: 40px;
-  --sp-12: 48px;
-  --sp-16: 64px;
-
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
   --radius-pill: 999px;
-
   --line: 1px solid var(--border);
   --line-strong: 1px solid var(--border-strong);
+  --motion-fast: 140ms;
+  --motion: 180ms;
+  --focus-ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent);
+  --bg: var(--canvas);
+  --surface-2: var(--group);
+  --surface-3: var(--control);
+}
 
-  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: #171513;
+    --surface: #211e1b;
+    --group: #2a2622;
+    --control: #332e29;
+    --selected: #453d36;
+    --text: #f4eee7;
+    --text-strong: #fffaf5;
+    --muted: #aaa097;
+    --muted-2: #756d66;
+    --border: rgba(255, 238, 221, .12);
+    --border-strong: rgba(255, 238, 221, .22);
+    --accent: #ff7a25;
+    --accent-strong: #ff8e45;
+    --accent-dim: rgba(255, 122, 37, .14);
+    --accent-line: rgba(255, 122, 37, .38);
+    --success: #43c56c;
+    --danger: #ff716b;
+    --danger-dim: rgba(255, 113, 107, .14);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion: 0ms;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  :root {
-    --motion: 180ms;
-  }
+  :root { --motion-fast: 0ms; --motion: 0ms; }
 }

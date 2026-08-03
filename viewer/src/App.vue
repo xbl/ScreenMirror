@@ -45,48 +45,6 @@ provide('roomId', roomId);
 </script>
 
 <style>
-:root {
-  color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #161a21;
-  --surface-2: #1d222b;
-  --surface-3: #242a35;
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.12);
-  --text: #e8e4dc;
-  --text-strong: #f7f4ee;
-  --muted: #8a8579;
-  --muted-2: #5d5952;
-  --accent: #7be0d2;
-  --accent-strong: #a3ecdf;
-  --accent-dim: rgba(123, 224, 210, 0.12);
-  --accent-line: rgba(123, 224, 210, 0.32);
-  --danger: #e27d60;
-  --font-display: 'Fraunces', 'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-pill: 999px;
-  --fs-12: 0.75rem;
-  --fs-14: 0.875rem;
-  --fs-15: 0.9375rem;
-  --fs-28: 1.75rem;
-  --sp-6: 24px;
-  --motion: 180ms;
-}
-html,
-body,
-#app {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-body);
-  font-size: var(--fs-15);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
+@import './styles/tokens.css';
+@import './styles/base.css';
 </style>

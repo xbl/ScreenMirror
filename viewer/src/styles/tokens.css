@@ -1,0 +1,32 @@
+:root {
+  color-scheme: light dark;
+  --canvas: #0e0d0c;
+  --surface: #211e1b;
+  --group: #2a2622;
+  --control: #332e29;
+  --selected: #453d36;
+  --text: #f4eee7;
+  --text-strong: #fffaf5;
+  --muted: #aaa097;
+  --muted-2: #756d66;
+  --border: rgba(255, 238, 221, .12);
+  --border-strong: rgba(255, 238, 221, .22);
+  --accent: #ff7a25;
+  --accent-strong: #ff8e45;
+  --accent-dim: rgba(255, 122, 37, .14);
+  --accent-line: rgba(255, 122, 37, .38);
+  --success: #43c56c;
+  --danger: #ff716b;
+  --danger-dim: rgba(255, 113, 107, .14);
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, monospace;
+  --fs-12: .75rem; --fs-14: .875rem; --fs-15: .9375rem; --fs-28: 1.75rem;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px; --radius-pill: 999px;
+  --motion-fast: 140ms; --motion: 180ms;
+  --focus-ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent);
+}
+@media (prefers-color-scheme: light) {
+  :root { color-scheme: light; --canvas: #f3efe9; --surface: #faf8f4; --group: #fffdfa; --control: #ebe5dc; --selected: #fff; --text: #211e1a; --text-strong: #171310; --muted: #786f65; --muted-2: #a39a90; --border: rgba(62,42,25,.13); --border-strong: rgba(62,42,25,.22); --accent: #e96316; --accent-strong: #cf5110; --accent-dim: rgba(233,99,22,.11); --accent-line: rgba(233,99,22,.34); --success: #35a55b; --danger: #c43f39; --danger-dim: rgba(196,63,57,.11); }
+}
+@media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion: 0ms; } }
