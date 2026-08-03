@@ -132,6 +132,7 @@ const pickerStep = ref<PickerStep>('types');
 let captureOperation = 0;
 let refreshGeneration = 0;
 let unlistenTrayOpened: UnlistenFn | undefined;
+let unlistenPickerOpened: UnlistenFn | undefined;
 
 const orderedKeys = ref<string[]>([]);
 const ordered = computed(() => {
@@ -237,7 +238,7 @@ async function resizePickerWindow(step: PickerStep) {
 }
 
 onMounted(() => {
-  void refreshSources();
+  void refreshSources(props.standalone);
   void resizePickerWindow('types');
   window.addEventListener('keydown', onKeydown);
   if (props.externalChooser) {
@@ -245,11 +246,17 @@ onMounted(() => {
       unlistenTrayOpened = stop;
     });
   }
+  if (props.standalone) {
+    void listen('source-picker-opened', () => refreshSources(true)).then((stop) => {
+      unlistenPickerOpened = stop;
+    });
+  }
 });
 watch([pickerStep, orderedWindows], ([step]) => { void resizePickerWindow(step); }, { flush: 'post' });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
   unlistenTrayOpened?.();
+  unlistenPickerOpened?.();
 });
 </script>
 

@@ -24,16 +24,6 @@
           </button>
         </section>
 
-        <section class="st-section st-inline-section">
-          <div>
-            <span class="st-label">{{ t('devices.title') }}</span>
-            <strong class="st-status">{{ viewerCount }}</strong>
-          </div>
-          <button class="st-icon-button" type="button" :aria-label="t('devices.title')" @click="$emit('open-devices')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 4h10M9 16h6" /></svg>
-          </button>
-        </section>
-
         <section class="st-section">
           <span class="st-label">{{ t('settings.version') }}</span>
           <span class="st-value st-mono">{{ version || '—' }}</span>
@@ -59,10 +49,9 @@ import { useI18n } from 'vue-i18n';
 import LanguageSelector from './LanguageSelector.vue';
 import { api } from '../utils/api';
 
-const props = defineProps<{ open: boolean; viewerCount: number }>();
+const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'open-devices'): void;
   (e: 'reset'): void;
 }>();
 

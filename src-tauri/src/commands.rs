@@ -7,7 +7,7 @@ use crate::storage::Storage;
 use crate::webrtc::host::prepare_all;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 pub struct CommandState {
@@ -257,6 +257,8 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("source-picker") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+        app.emit("source-picker-opened", ())
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
     let _window = tauri::WebviewWindowBuilder::new(

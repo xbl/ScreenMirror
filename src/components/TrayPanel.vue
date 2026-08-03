@@ -40,9 +40,7 @@
     />
     <SettingsOverlay
       :open="showSettings"
-      :viewer-count="viewerCount"
       @close="showSettings = false"
-      @open-devices="showDevices = true; showSettings = false"
       @reset="onReset"
     />
   </main>

@@ -10,9 +10,11 @@ const apiMocks = vi.hoisted(() => ({
   setCaptureTarget: vi.fn(),
 }));
 const windowMocks = vi.hoisted(() => ({ close: vi.fn() }));
+const eventMocks = vi.hoisted(() => ({ listen: vi.fn() }));
 
 vi.mock('../src/utils/api', () => ({ api: apiMocks }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => windowMocks }));
+vi.mock('@tauri-apps/api/event', () => eventMocks);
 
 const sources = [
   { id: 'screen:0', sourceId: 'main-display', name: 'Built-in Retina Display', kind: 'screen' as const, isPrimary: true, preview: null, width: 2560, height: 1600 },
@@ -45,6 +47,7 @@ describe('SourcePicker', () => {
     apiMocks.getCaptureTarget.mockResolvedValue({ kind: 'screen', id: 0, sourceId: 'main-display', quality: 0.75 });
     apiMocks.setCaptureTarget.mockResolvedValue(undefined);
     windowMocks.close.mockResolvedValue(undefined);
+    eventMocks.listen.mockResolvedValue(vi.fn());
   });
 
   it('keeps the embedded control compact and shows only the current source', async () => {
@@ -139,5 +142,20 @@ describe('SourcePicker', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Refreshed App');
+  });
+
+  it('refreshes sources when the reused standalone window is opened', async () => {
+    const wrapper = mountPicker(true);
+    await flushPromises();
+    const openHandler = eventMocks.listen.mock.calls.find(([event]) => event === 'source-picker-opened')?.[1];
+    expect(openHandler).toBeTypeOf('function');
+
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([{ ...sources[0], name: 'Updated Display' }]);
+    apiMocks.getCaptureSourcePreview.mockResolvedValueOnce('data:image/jpeg;base64,updated');
+    await openHandler?.();
+    await flushPromises();
+
+    expect(wrapper.get('[data-source-type="screen"] img').attributes('src')).toBe('data:image/jpeg;base64,updated');
+    expect(apiMocks.getCaptureSourcePreview).toHaveBeenLastCalledWith('main-display', true);
   });
 });

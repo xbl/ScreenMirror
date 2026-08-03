@@ -268,12 +268,6 @@ async function main() {
     });
     console.log('[puppeteer-e2e] pixel stats:', JSON.stringify(pixelStats));
 
-    // Get latest data-channel message count via console
-    const dcInfo = await page.evaluate(() => {
-      // @ts-ignore
-      return window.__dcStats ?? null;
-    });
-
     await browser.close();
     cleanup();
 

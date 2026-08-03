@@ -20,6 +20,7 @@ import WebSocket from 'ws';
 import wrtcPkg from '@roamhq/wrtc';
 const { RTCPeerConnection, RTCSessionDescription } = wrtcPkg;
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -210,7 +211,7 @@ const pc = new RTCPeerConnection({
     }
 
     // Compute byte-level hash for proof of uniqueness.
-    const hashes = frames.map((f) => require('node:crypto').createHash('sha256').update(f.jpeg).digest('hex').slice(0, 16));
+    const hashes = frames.map((f) => crypto.createHash('sha256').update(f.jpeg).digest('hex').slice(0, 16));
     console.log('[e2e-frames] frame SHA-256 (first 16 hex):', hashes);
 
     // Verify JPEG magic bytes
