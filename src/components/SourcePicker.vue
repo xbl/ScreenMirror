@@ -1,7 +1,7 @@
 <template>
-  <section class="source-picker" :class="{ 'source-picker-standalone': standalone }" aria-labelledby="source-picker-title">
+  <section class="source-picker" :class="{ 'source-picker-standalone': standalone }" aria-labelledby="source-picker-title" @mousedown="handleWindowMouseDown">
     <template v-if="standalone">
-      <header class="sp-standalone-head" @mousedown.prevent="startWindowDrag">
+      <header class="sp-standalone-head">
         <button v-if="pickerStep === 'windows'" class="sp-back" type="button" :aria-label="t('source.back')" @mousedown.stop @click="pickerStep = 'types'">
           <span aria-hidden="true">&#8249;</span>
           {{ t('source.back') }}
@@ -154,9 +154,11 @@ function resolution(source: CaptureSourceInfo) { return t('source.resolution', {
 function qualityValue(value: Quality) { return { balanced: 0.5, high: 0.75, ultra: 1.0 }[value]; }
 function qualityName(value: number): Quality { return value >= 0.9 ? 'ultra' : value >= 0.65 ? 'high' : 'balanced'; }
 function openPicker() { if (props.externalChooser) void api.openSourcePickerWindow(); }
-function startWindowDrag(event: MouseEvent) {
-  event.preventDefault();
+function handleWindowMouseDown(event: MouseEvent) {
   if (event.button !== 0) return;
+  const target = event.target;
+  if (target instanceof Element && target.closest('button, input, select, textarea, a')) return;
+  event.preventDefault();
   void api.startSourcePickerDrag();
 }
 async function closePicker() {
