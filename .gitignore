@@ -10,3 +10,4 @@ viewer/node_modules
 *.log
 tools/output
 .superpowers/
+.playwright-cli/
