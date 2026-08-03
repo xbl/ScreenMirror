@@ -7,18 +7,18 @@
 use std::net::UdpSocket;
 use std::sync::{
     atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-    Arc,
+    Arc, Weak,
 };
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_rtp_timestamp, capture_fps_for_target, dequeue_queued_frame, plan_target_switch,
-        prepare_all, queue_admission, require_expected_generation, should_drop_encoded_frame,
-        HostPeer, QueueAdmission, QueuedEncodedFrame, TargetSwitchPlan,
+        advance_rtp_timestamp, dequeue_queued_frame, plan_target_switch, queue_admission,
+        require_expected_generation, should_drop_encoded_frame, HostPeer, QueueAdmission,
+        QueuedEncodedFrame, SharedCapture, TargetSwitchPlan,
     };
-    use crate::webrtc::{CaptureKind, CaptureTarget, H264EncodedFrame};
+    use crate::webrtc::H264EncodedFrame;
     use parking_lot::Mutex;
     use std::{
         sync::{mpsc, Arc},
@@ -70,23 +70,6 @@ mod tests {
     }
 
     #[test]
-    fn batch_prepare_does_not_return_partial_candidates_when_a_peer_fails() {
-        let mut prepared = Vec::new();
-        let error = prepare_all(["peer-a", "peer-b", "peer-c"], |peer| {
-            prepared.push(peer);
-            if peer == "peer-b" {
-                Err("peer-b cannot start capture".to_string())
-            } else {
-                Ok(peer)
-            }
-        })
-        .expect_err("a failed peer must prevent a partial commit");
-
-        assert_eq!(error, "peer-b cannot start capture");
-        assert_eq!(prepared, ["peer-a", "peer-b"]);
-    }
-
-    #[test]
     fn pending_keyframe_is_not_replaced_by_a_delta_frame() {
         assert_eq!(queue_admission(true, false), QueueAdmission::KeepExisting);
         assert_eq!(
@@ -106,18 +89,6 @@ mod tests {
     }
 
     #[test]
-    fn media_added_uses_the_current_active_target_profile() {
-        let active_target = CaptureTarget {
-            kind: CaptureKind::TestPattern,
-            id: 0,
-            source_id: None,
-            quality: 0.75,
-        };
-
-        assert_eq!(capture_fps_for_target(&active_target), 30);
-    }
-
-    #[test]
     fn generation_mismatch_blocks_commit_before_any_target_is_published() {
         let error = require_expected_generation(8, 7)
             .expect_err("a prepared target cannot commit over a newer generation");
@@ -128,6 +99,55 @@ mod tests {
     #[test]
     fn queued_keyframe_wins_when_a_competing_sink_enqueues_after_commit() {
         assert_eq!(queue_admission(true, true), QueueAdmission::KeepExisting);
+    }
+
+    #[test]
+    fn shared_capture_replays_its_last_keyframe_to_a_joining_peer() {
+        let shared = SharedCapture::new();
+        let first = Arc::new(HostPeer::new());
+        shared.subscribe("first".into(), &first);
+        shared.deliver(H264EncodedFrame {
+            data: vec![0, 0, 1, 0x65],
+            keyframe: true,
+            captured_at: Instant::now(),
+        });
+
+        let joining = Arc::new(HostPeer::new());
+        shared.subscribe("joining".into(), &joining);
+
+        assert!(
+            dequeue_queued_frame(&joining.frame_rx)
+                .expect("joining peer receives cached keyframe")
+                .frame
+                .keyframe
+        );
+    }
+
+    #[test]
+    fn failed_peer_start_does_not_join_shared_capture() {
+        let shared = Arc::new(SharedCapture::new());
+        shared.deliver(H264EncodedFrame {
+            data: vec![0, 0, 1, 0x65],
+            keyframe: true,
+            captured_at: Instant::now(),
+        });
+        let peer = Arc::new(HostPeer::new());
+
+        assert!(peer
+            .clone()
+            .start_sharing(
+                crate::webrtc::CaptureTarget {
+                    kind: crate::webrtc::CaptureKind::TestPattern,
+                    id: 0,
+                    source_id: None,
+                    quality: 0.5,
+                },
+                30,
+                shared,
+                "peer".into(),
+            )
+            .is_err());
+        assert!(dequeue_queued_frame(&peer.frame_rx).is_none());
     }
 
     #[test]
@@ -188,6 +208,99 @@ use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 
 use crate::webrtc::{spawn_video_capture_loop, CaptureTarget, H264EncodedFrame, VideoFrameSink};
 
+/// One capture/encode pipeline shared by every connected viewer. Each peer
+/// keeps its own bounded queue, so a slow receiver only loses its own stale
+/// frames and cannot make the producer fall behind.
+pub struct SharedCapture {
+    handle: Mutex<Option<crate::webrtc::CaptureHandle>>,
+    target: Mutex<Option<CaptureTarget>>,
+    subscribers: Mutex<std::collections::HashMap<String, Weak<HostPeer>>>,
+    last_keyframe: Mutex<Option<H264EncodedFrame>>,
+}
+
+impl SharedCapture {
+    pub fn new() -> Self {
+        Self {
+            handle: Mutex::new(None),
+            target: Mutex::new(None),
+            subscribers: Mutex::new(std::collections::HashMap::new()),
+            last_keyframe: Mutex::new(None),
+        }
+    }
+
+    pub fn subscribe(&self, id: String, peer: &Arc<HostPeer>) {
+        self.subscribers.lock().insert(id, Arc::downgrade(peer));
+        if let Some(frame) = self.last_keyframe.lock().clone() {
+            peer.enqueue_shared_frame(frame);
+        }
+    }
+
+    pub fn unsubscribe(&self, id: &str) {
+        let empty = {
+            let mut subscribers = self.subscribers.lock();
+            subscribers.remove(id);
+            subscribers.is_empty()
+        };
+        if empty {
+            if let Some(handle) = self.handle.lock().take() {
+                handle.stop();
+            }
+            *self.last_keyframe.lock() = None;
+        }
+    }
+
+    fn deliver(&self, frame: H264EncodedFrame) {
+        if frame.keyframe {
+            *self.last_keyframe.lock() = Some(frame.clone());
+        }
+        let peers = {
+            let mut subscribers = self.subscribers.lock();
+            subscribers.retain(|_, peer| peer.strong_count() != 0);
+            subscribers
+                .values()
+                .filter_map(Weak::upgrade)
+                .collect::<Vec<_>>()
+        };
+        for peer in peers {
+            peer.enqueue_shared_frame(frame.clone());
+        }
+    }
+
+    pub fn ensure_running(self: &Arc<Self>, target: CaptureTarget, fps: u32) {
+        let mut handle = self.handle.lock();
+        if handle.is_some() {
+            return;
+        }
+        *self.target.lock() = Some(target.clone());
+        let shared = Arc::downgrade(self);
+        let sink: VideoFrameSink = Arc::new(move |frame| {
+            if let Some(shared) = shared.upgrade() {
+                shared.deliver(frame);
+            }
+        });
+        *handle = Some(spawn_video_capture_loop(target, fps, sink));
+    }
+
+    pub fn switch_target(self: &Arc<Self>, target: CaptureTarget, fps: u32) -> Result<(), String> {
+        crate::webrtc::capture_one_at(&target, 0).map(|_| ())?;
+        if let Some(handle) = self.handle.lock().take() {
+            handle.stop();
+        }
+        *self.last_keyframe.lock() = None;
+        *self.target.lock() = Some(target.clone());
+        if !self.subscribers.lock().is_empty() {
+            self.ensure_running(target, fps);
+        }
+        Ok(())
+    }
+}
+
+impl Default for SharedCapture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn should_drop_encoded_frame(age: Duration, keyframe: bool) -> bool {
     age > Duration::from_millis(500) && !keyframe
 }
@@ -220,16 +333,6 @@ where
     }
 }
 
-pub(crate) fn prepare_all<T, P, F>(
-    items: impl IntoIterator<Item = T>,
-    mut prepare: F,
-) -> Result<Vec<P>, String>
-where
-    F: FnMut(T) -> Result<P, String>,
-{
-    items.into_iter().map(&mut prepare).collect()
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum QueueAdmission {
     KeepExisting,
@@ -246,10 +349,6 @@ fn queue_admission(existing_is_keyframe: bool, incoming_is_keyframe: bool) -> Qu
 
 fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
     timestamp.wrapping_add(90_000 / i64::from(fps.max(1)))
-}
-
-fn capture_fps_for_target(target: &CaptureTarget) -> u32 {
-    crate::webrtc::profile_fps(target.quality)
 }
 
 fn require_expected_generation(current: u64, expected: u64) -> Result<(), String> {
@@ -590,18 +689,6 @@ impl HostPeer {
         Ok(())
     }
 
-    fn start_capture_if_needed(&self) -> Result<(), String> {
-        if self.capture_handle.lock().is_some() {
-            return Ok(());
-        }
-        let target = self
-            .active_target
-            .lock()
-            .clone()
-            .ok_or_else(|| "capture target missing".to_string())?;
-        self.switch_target(target.clone(), capture_fps_for_target(&target))
-    }
-
     fn start_candidate_capture(
         &self,
         target: CaptureTarget,
@@ -654,6 +741,12 @@ impl HostPeer {
         enqueue_queued_frame(&self.frame_tx, &self.frame_rx, queued)
     }
 
+    fn enqueue_shared_frame(&self, frame: H264EncodedFrame) {
+        let _queue = self.frame_queue_lock.lock();
+        let generation = self.capture_generation.load(Ordering::SeqCst);
+        let _ = self.enqueue_frame_locked(QueuedEncodedFrame { generation, frame });
+    }
+
     fn clear_queued_frames(&self) {
         let _queue = self.frame_queue_lock.lock();
         self.clear_queued_frames_locked();
@@ -667,26 +760,31 @@ impl HostPeer {
         self: Arc<Self>,
         target: CaptureTarget,
         fps: u32,
-        capture_target_switch_lock: Arc<Mutex<()>>,
+        shared_capture: Arc<SharedCapture>,
+        connection_id: String,
     ) -> Result<(), String> {
-        self.switch_target(target, fps)?;
         let socket = self
             .socket
             .lock()
             .take()
             .ok_or_else(|| "socket missing".to_string())?;
+        *self.active_target.lock() = Some(target.clone());
+        self.rtp_timestamp_step
+            .store(90_000 / i64::from(fps.max(1)), Ordering::SeqCst);
+        shared_capture.ensure_running(target, fps);
         let rtc_arc = self.rtc.clone();
         let frame_rx = self.frame_rx.clone();
         let video_mid_slot = self.video_mid.clone();
-        let peer_for_loop = self.clone();
         let capture_switch_lock = self.capture_switch_lock.clone();
         let capture_generation = self.capture_generation.clone();
         let rtp_timestamp_step = self.rtp_timestamp_step.clone();
+        let peer_for_subscription = self.clone();
 
         std::thread::spawn(move || {
             let mut buf = vec![0u8; 2000];
             let mut video_mid: Option<Mid> = None;
             let mut timestamp: i64 = 0;
+            let mut subscribed = false;
             'outer: loop {
                 // Drain every output (events / transmit packets / pending timeouts)
                 // before falling back to the network read. str0m::Rtc::poll_output
@@ -729,9 +827,10 @@ impl HostPeer {
                                 event.mid,
                                 event.direction
                             );
-                            let _target_switch = capture_target_switch_lock.lock();
-                            if let Err(error) = peer_for_loop.start_capture_if_needed() {
-                                tracing::error!("host: initial capture did not start: {error}");
+                            if !subscribed {
+                                shared_capture
+                                    .subscribe(connection_id.clone(), &peer_for_subscription);
+                                subscribed = true;
                             }
                         }
                         Ok(Output::Event(Event::IceConnectionStateChange(

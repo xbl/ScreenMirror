@@ -16,7 +16,7 @@ pub mod video_toolbox;
 pub mod video_toolbox_iosurface;
 pub mod video_toolbox_native;
 
-pub use host::HostPeer;
+pub use host::{HostPeer, SharedCapture};
 pub use screencapturekit_capture::{
     start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame,
 };
@@ -340,31 +340,63 @@ pub fn get_capture_source_preview(
                 let window = Window::all()
                     .map_err(|error| error.to_string())?
                     .into_iter()
-                    .find(|window| window.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
-                let Some(window) = window else { return Ok(None); };
+                    .find(|window| {
+                        window.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id)
+                    });
+                let Some(window) = window else {
+                    return Ok(None);
+                };
                 let width = window.width().unwrap_or(0);
                 let height = window.height().unwrap_or(0);
-                Ok(capture_source_preview(source_id, source_kind, width, height, force_refresh, || {
-                    window
-                        .capture_image()
-                        .map_err(|error| error.to_string())
-                        .and_then(|image| RgbaImage::from_raw(image.width(), image.height(), image.into_raw()).ok_or_else(|| "window preview has invalid image dimensions".into()))
-                }))
+                Ok(capture_source_preview(
+                    source_id,
+                    source_kind,
+                    width,
+                    height,
+                    force_refresh,
+                    || {
+                        window
+                            .capture_image()
+                            .map_err(|error| error.to_string())
+                            .and_then(|image| {
+                                RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
+                                    .ok_or_else(|| {
+                                        "window preview has invalid image dimensions".into()
+                                    })
+                            })
+                    },
+                ))
             }
             _ => {
                 let monitor = Monitor::all()
                     .map_err(|error| error.to_string())?
                     .into_iter()
-                    .find(|monitor| monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id));
-                let Some(monitor) = monitor else { return Ok(None); };
+                    .find(|monitor| {
+                        monitor.id().map(|id| id.to_string()).ok().as_deref() == Some(source_id)
+                    });
+                let Some(monitor) = monitor else {
+                    return Ok(None);
+                };
                 let width = monitor.width().unwrap_or(0);
                 let height = monitor.height().unwrap_or(0);
-                Ok(capture_source_preview(source_id, source_kind, width, height, force_refresh, || {
-                    monitor
-                        .capture_image()
-                        .map_err(|error| error.to_string())
-                        .and_then(|image| RgbaImage::from_raw(image.width(), image.height(), image.into_raw()).ok_or_else(|| "display preview has invalid image dimensions".into()))
-                }))
+                Ok(capture_source_preview(
+                    source_id,
+                    source_kind,
+                    width,
+                    height,
+                    force_refresh,
+                    || {
+                        monitor
+                            .capture_image()
+                            .map_err(|error| error.to_string())
+                            .and_then(|image| {
+                                RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
+                                    .ok_or_else(|| {
+                                        "display preview has invalid image dimensions".into()
+                                    })
+                            })
+                    },
+                ))
             }
         }
     }
@@ -409,6 +441,10 @@ pub struct CapturedFrame {
 
 fn normalize_encoder_dimensions(width: u32, height: u32) -> (u32, u32) {
     (width & !1, height & !1)
+}
+
+fn needs_encoder_rebuild(current: Option<(u32, u32)>, incoming: (u32, u32)) -> bool {
+    current != Some(incoming)
 }
 
 /// Choose an even capture size while preserving the source aspect ratio.
@@ -738,16 +774,31 @@ pub fn spawn_video_capture_loop(
             let encode_started = std::time::Instant::now();
             let native_result = if let Some(native_frame) = frame.screenkit.take() {
                 if !iosurface_disabled {
-                    if iosurface_encoder.is_none() {
+                    let native_dimensions =
+                        normalize_encoder_dimensions(native_frame.width, native_frame.height);
+                    if needs_encoder_rebuild(
+                        iosurface_encoder
+                            .as_ref()
+                            .map(IOSurfaceVideoEncoder::dimensions),
+                        native_dimensions,
+                    ) {
+                        if iosurface_encoder.is_some() {
+                            tracing::info!(
+                                width = native_dimensions.0,
+                                height = native_dimensions.1,
+                                "ScreenCaptureKit dimensions changed; rebuilding VideoToolbox encoder"
+                            );
+                        }
+                        iosurface_encoder = None;
                         let kbps = capture_bitrate_kbps(
-                            native_frame.width,
-                            native_frame.height,
+                            native_dimensions.0,
+                            native_dimensions.1,
                             fps,
                             target.quality,
                         );
                         match IOSurfaceVideoEncoder::new(
-                            native_frame.width & !1,
-                            native_frame.height & !1,
+                            native_dimensions.0,
+                            native_dimensions.1,
                             fps.max(1),
                             kbps,
                         ) {
@@ -773,7 +824,9 @@ pub fn spawn_video_capture_loop(
                                 // copy. Dropping one failed frame is preferable
                                 // to permanently falling back to a slow path
                                 // that cannot consume later IOSurfaces.
-                                tracing::warn!("native IOSurface encode failed; dropping frame: {error}");
+                                tracing::warn!(
+                                    "native IOSurface encode failed; dropping frame: {error}"
+                                );
                                 Some(Err(error.to_string()))
                             }
                         }
@@ -814,14 +867,14 @@ pub fn spawn_video_capture_loop(
                     .map(|value| value.dimensions() != rgba_dimensions)
                     .unwrap_or(true)
                 {
-                    let kbps =
-                        capture_bitrate_kbps(rgba_dimensions.0, rgba_dimensions.1, fps, target.quality);
-                    match VideoEncoder::new(
+                    let kbps = capture_bitrate_kbps(
                         rgba_dimensions.0,
                         rgba_dimensions.1,
-                        fps.max(1),
-                        kbps,
-                    ) {
+                        fps,
+                        target.quality,
+                    );
+                    match VideoEncoder::new(rgba_dimensions.0, rgba_dimensions.1, fps.max(1), kbps)
+                    {
                         Ok(value) => encoder = Some(value),
                         Err(error) => {
                             tracing::warn!("video encoder initialization failed: {error}");
@@ -888,13 +941,14 @@ pub fn spawn_video_capture_loop(
             None
         };
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
-        let use_screenkit_capture = matches!(target.kind, CaptureKind::Screen | CaptureKind::Window)
-            && std::env::var("SCREENMIRROR_USE_IOSURFACE")
-                .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-                // ScreenCaptureKit delivers frames at the requested cadence;
-                // xcap's recorder can block for 200ms+ on high-DPI displays.
-                // Keep an explicit opt-out for diagnostics and older macOS.
-                .unwrap_or(true);
+        let use_screenkit_capture =
+            matches!(target.kind, CaptureKind::Screen | CaptureKind::Window)
+                && std::env::var("SCREENMIRROR_USE_IOSURFACE")
+                    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                    // ScreenCaptureKit delivers frames at the requested cadence;
+                    // xcap's recorder can block for 200ms+ on high-DPI displays.
+                    // Keep an explicit opt-out for diagnostics and older macOS.
+                    .unwrap_or(true);
         #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
         let use_screenkit_capture = false;
         #[cfg(target_os = "macos")]
@@ -968,9 +1022,7 @@ pub fn spawn_video_capture_loop(
                 .map(|capture| capture.recv_timeout(interval));
             let captured = if let Some(screenkit_result) = screenkit_result {
                 match screenkit_result {
-                    Ok(frame) => {
-                        captured_frame_from_screenkit(frame, target.quality)
-                    }
+                    Ok(frame) => captured_frame_from_screenkit(frame, target.quality),
                     // ScreenCaptureKit is change-driven. A timeout means no
                     // new content, not that the stream has failed; retaining
                     // it avoids falling back to slow full-screen xcap polls.
@@ -1077,11 +1129,10 @@ pub struct CaptureHandle {
 mod tests {
     use super::{
         begin_preview_request, capture_bitrate_kbps, capture_dimensions, finish_preview_request,
-        is_shareable_window, legacy_capture_source_id,
+        is_shareable_window, legacy_capture_source_id, needs_encoder_rebuild,
         normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, preview_dimensions,
         preview_from_capture_result, profile_fps, profile_max_dim, select_source_index,
-        store_preview_if_current, DisplayPreviewCache,
-        PreviewCacheKey,
+        store_preview_if_current, DisplayPreviewCache, PreviewCacheKey,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use image::RgbaImage;
@@ -1095,6 +1146,13 @@ mod tests {
     #[test]
     fn preserves_even_capture_dimensions() {
         assert_eq!(normalize_encoder_dimensions(1920, 1248), (1920, 1248));
+    }
+
+    #[test]
+    fn encoder_rebuilds_when_the_capture_dimensions_change() {
+        assert!(!needs_encoder_rebuild(Some((1512, 982)), (1512, 982)));
+        assert!(needs_encoder_rebuild(Some((1512, 982)), (1280, 800)));
+        assert!(needs_encoder_rebuild(None, (1280, 800)));
     }
 
     #[test]
@@ -1141,7 +1199,12 @@ mod tests {
     fn filters_macos_system_windows_from_shareable_sources() {
         assert!(!is_shareable_window("SystemUIServer", "Menu Bar", 1440, 24));
         assert!(!is_shareable_window("Window Server", "", 1440, 900));
-        assert!(!is_shareable_window("Terminal", "StatusIndicator", 800, 600));
+        assert!(!is_shareable_window(
+            "Terminal",
+            "StatusIndicator",
+            800,
+            600
+        ));
         assert!(!is_shareable_window("Terminal", "Small palette", 120, 60));
     }
 

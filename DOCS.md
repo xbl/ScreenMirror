@@ -17,11 +17,12 @@
 
 ## Media pipeline
 
-1. `xcap` captures the selected monitor or window as RGBA pixels.
-2. The macOS VideoToolbox H.264 encoder produces Annex-B access units.
-3. `str0m` negotiates a video media section and packetizes samples into RTP.
-4. The browser receives a `MediaStream` through `RTCPeerConnection.ontrack`.
-5. The viewer binds the stream to a native `<video>` element.
+1. ScreenCaptureKit (or the xcap fallback) captures the selected source once.
+2. The macOS VideoToolbox H.264 encoder produces one shared Annex-B stream per
+   viewer capability tier: mobile (1280px) and the host-selected desktop tier.
+3. Each WebRTC peer receives the newest frame from its tier through its own bounded queue.
+4. `str0m` packetizes samples into the peer's RTP session.
+5. The browser receives a `MediaStream` through `RTCPeerConnection.ontrack`.
 
 ## Capture sources and live switching
 
@@ -86,4 +87,4 @@ and are intentionally ignored by git.
 
 ## Scope
 
-The project intentionally focuses on local screen sharing, QR-based connection, a single viewer slot, screen/window selection, and English/Simplified Chinese interfaces. Paid upgrades, remote analytics, external tracking, and unrelated account features are outside the project scope.
+The project intentionally focuses on local screen sharing, QR-based multi-viewer connection, screen/window selection, and English/Simplified Chinese interfaces. Paid upgrades, remote analytics, external tracking, and unrelated account features are outside the project scope.

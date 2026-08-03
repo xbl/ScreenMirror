@@ -123,22 +123,37 @@ pub fn start_screen_capture(
     let (filter, source_width, source_height) = match target.kind {
         super::CaptureKind::Screen => {
             let displays = content.displays();
-            let ids = displays.iter().map(|d| d.display_id().to_string()).collect::<Vec<_>>();
-            let index = super::select_source_index(&ids, target.source_id.as_deref(), target.id, "display")
-                .map_err(ScreenKitError::Unavailable)?;
-            let display = displays.get(index).ok_or_else(|| ScreenKitError::Unavailable("display unavailable".into()))?;
+            let ids = displays
+                .iter()
+                .map(|d| d.display_id().to_string())
+                .collect::<Vec<_>>();
+            let index =
+                super::select_source_index(&ids, target.source_id.as_deref(), target.id, "display")
+                    .map_err(ScreenKitError::Unavailable)?;
+            let display = displays
+                .get(index)
+                .ok_or_else(|| ScreenKitError::Unavailable("display unavailable".into()))?;
             (
-                SCContentFilter::create().with_display(display).with_excluding_windows(&[]).build(),
+                SCContentFilter::create()
+                    .with_display(display)
+                    .with_excluding_windows(&[])
+                    .build(),
                 display.width(),
                 display.height(),
             )
         }
         super::CaptureKind::Window => {
             let windows = content.windows();
-            let ids = windows.iter().map(|w| w.window_id().to_string()).collect::<Vec<_>>();
-            let index = super::select_source_index(&ids, target.source_id.as_deref(), target.id, "window")
-                .map_err(ScreenKitError::Unavailable)?;
-            let window = windows.get(index).ok_or_else(|| ScreenKitError::Unavailable("window unavailable".into()))?;
+            let ids = windows
+                .iter()
+                .map(|w| w.window_id().to_string())
+                .collect::<Vec<_>>();
+            let index =
+                super::select_source_index(&ids, target.source_id.as_deref(), target.id, "window")
+                    .map_err(ScreenKitError::Unavailable)?;
+            let window = windows
+                .get(index)
+                .ok_or_else(|| ScreenKitError::Unavailable("window unavailable".into()))?;
             let frame = window.frame();
             (
                 SCContentFilter::create().with_window(window).build(),
@@ -146,7 +161,11 @@ pub fn start_screen_capture(
                 frame.size.height.max(2.0) as u32,
             )
         }
-        _ => return Err(ScreenKitError::Unavailable("unsupported capture target".into())),
+        _ => {
+            return Err(ScreenKitError::Unavailable(
+                "unsupported capture target".into(),
+            ))
+        }
     };
     // Ask ScreenCaptureKit to scale before delivering BGRA. Capturing a full
     // Retina surface and resizing/copying it after delivery makes the cost

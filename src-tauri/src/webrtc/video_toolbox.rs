@@ -49,6 +49,7 @@ pub fn is_keyframe(sample: &[u8]) -> bool {
         .any(|nal| matches!(nal.first().map(|v| v & 0x1f), Some(5)))
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "screenkit")))]
 /// CoreMedia's sample attachment is authoritative when available. NAL probing
 /// remains the portable fallback for encoders that do not expose a sample.
 pub(crate) fn keyframe_from_markers(nal_contains_idr: bool, coremedia_sync: Option<bool>) -> bool {

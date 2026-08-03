@@ -31,6 +31,7 @@ const PORT = Number(process.env.SCREENMIRROR_DIAG_PORT ?? 3131);
 const BASE = `http://127.0.0.1:${PORT}`;
 const CHROME_BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const DEBUG_PORT = Number(process.env.SCREENMIRROR_DIAG_CHROME_DEBUG_PORT ?? 9444);
+const VIEWER_COUNT = Number(process.env.SCREENMIRROR_DIAG_VIEWERS ?? 1);
 const USER_DATA_DIR = `/tmp/screenmirror-chrome-${Date.now()}`;
 
 function get(p) {
@@ -162,6 +163,13 @@ async function main() {
     console.log(`[diag] navigating to ${BASE}/${ROOM_ID}`);
     await page.goto(`${BASE}/${ROOM_ID}`, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log(`[diag] page loaded at +${Date.now() - t0}ms`);
+    let secondPage = null;
+    if (VIEWER_COUNT === 2) {
+      secondPage = await browser.newPage();
+      await secondPage.setCacheEnabled(false);
+      console.log(`[diag] navigating second viewer to ${BASE}/${ROOM_ID}`);
+      await secondPage.goto(`${BASE}/${ROOM_ID}`, { waitUntil: 'networkidle2', timeout: 30000 });
+    }
     spawnSync('osascript', ['-e', 'tell application "System Events" to tell process "Clock" to set frontmost to true']);
     await new Promise((resolve) => setTimeout(resolve, 500));
     let baseline = null;
@@ -292,8 +300,23 @@ async function main() {
     await page.screenshot({ path: path.join(OUT_DIR, 'diag-direct.png'), fullPage: true });
 
     const final = trace[trace.length - 1];
+    const secondViewer = secondPage ? await secondPage.evaluate(async () => {
+      const video = document.querySelector('video.frame');
+      const reports = await window.__smPc?.getStats();
+      const inbound = reports && [...reports.values()].find(
+        (report) => report.type === 'inbound-rtp' && report.kind === 'video',
+      );
+      return {
+        videoWidth: video?.videoWidth ?? 0,
+        readyState: video?.readyState ?? -1,
+        framesReceived: inbound?.framesReceived ?? 0,
+        framesDecoded: inbound?.framesDecoded ?? 0,
+        packetsLost: inbound?.packetsLost ?? 0,
+      };
+    }) : null;
     console.log('\n=== FINAL STATE ===');
     console.log(JSON.stringify(final, null, 2));
+    if (secondViewer) console.log('[diag] second viewer', JSON.stringify(secondViewer));
 
     await browser.disconnect();
   } catch (e) {

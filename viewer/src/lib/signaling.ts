@@ -6,6 +6,7 @@ export type WireMessage = {
 export type ViewerMetadata = {
   os: string;
   browser: string;
+  maxVideoDimension: number;
 };
 
 export function getViewerMetadata(): ViewerMetadata {
@@ -33,7 +34,8 @@ export function getViewerMetadata(): ViewerMetadata {
           : /Safari\//.test(userAgent)
             ? 'Safari'
             : 'Unknown browser';
-  return { os, browser };
+  const visiblePixels = Math.ceil(Math.max(window.innerWidth, window.innerHeight) * window.devicePixelRatio);
+  return { os, browser, maxVideoDimension: Math.min(Math.max(visiblePixels, 640), 3840) };
 }
 
 export function connectSignaling(

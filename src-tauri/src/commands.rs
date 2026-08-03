@@ -4,7 +4,6 @@ use crate::signaling::devices::{ConnectedDevicesService, Device};
 use crate::signaling::handlers::HostPeerMap;
 use crate::signaling::room_id::RoomIDService;
 use crate::storage::Storage;
-use crate::webrtc::host::prepare_all;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,6 +19,8 @@ pub struct CommandState {
     /// Serializes the prepare/commit transaction across every active peer.
     pub capture_target_switch_lock: Arc<Mutex<()>>,
     pub host_peers: HostPeerMap,
+    pub shared_capture: Arc<crate::webrtc::SharedCapture>,
+    pub mobile_capture: Arc<crate::webrtc::SharedCapture>,
     pub viewer_sinks:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
 }
@@ -345,26 +346,20 @@ pub fn set_capture_target(
     };
     let fps = crate::webrtc::profile_fps(target.quality);
     let _transaction = state.capture_target_switch_lock.lock();
-    let peers = state
-        .host_peers
-        .lock()
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
-    if peers.is_empty() {
+    let has_peers = !state.host_peers.lock().is_empty();
+    if !has_peers {
         validate_target_for_empty_peer_set(&target, |candidate| {
             crate::webrtc::capture_one_at(candidate, 0).map(|_| ())
         })?;
     }
-    let prepared = prepare_all(peers, |peer| {
-        peer.prepare_target_switch(target.clone(), fps)
-            .map(|prepared| (peer, prepared))
-    })?;
-    for (peer, prepared_target) in &prepared {
-        peer.validate_prepared_target_switch(prepared_target)?;
-    }
-    for (peer, prepared_target) in prepared {
-        peer.commit_target_switch(prepared_target);
+    if has_peers {
+        state.shared_capture.switch_target(target.clone(), fps)?;
+        let mut mobile_target = target.clone();
+        mobile_target.quality = mobile_target.quality.min(0.5);
+        state.mobile_capture.switch_target(
+            mobile_target.clone(),
+            crate::webrtc::profile_fps(mobile_target.quality),
+        )?;
     }
     *state.capture_target.lock() = Some(target);
     app.emit("capture-target-changed", target_event)

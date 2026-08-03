@@ -1,6 +1,6 @@
 use crate::signaling::devices::ConnectedDevicesService;
 use crate::signaling::room_id::RoomIDService;
-use crate::webrtc::HostPeer;
+use crate::webrtc::{HostPeer, SharedCapture};
 use axum::{
     extract::{
         connect_info::ConnectInfo,
@@ -16,12 +16,12 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    net::SocketAddr,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    net::SocketAddr,
 };
 use tokio::sync::mpsc;
 
@@ -43,6 +43,10 @@ pub fn parse_message(raw: &str) -> Result<WireMessage, serde_json::Error> {
     serde_json::from_str(raw)
 }
 
+pub fn uses_mobile_capture_profile(os: &str, max_video_dimension: u32) -> bool {
+    max_video_dimension <= 1280 || matches!(os, "iOS" | "Android")
+}
+
 /// Map of room_id → sender to push messages to the connected viewer.
 pub type ViewerSinkMap =
     Arc<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<String>>>>;
@@ -57,6 +61,9 @@ pub struct AppState {
     pub viewer_path: PathBuf,
     /// Active host peer per viewer connection. Multiple peers may share a room.
     pub host_peers: HostPeerMap,
+    /// One shared capture and encode pipeline fan-outs frames to all peers.
+    pub shared_capture: Arc<SharedCapture>,
+    pub mobile_capture: Arc<SharedCapture>,
     /// Per-connection viewer sink. When host creates an answer, push it here.
     pub viewer_sinks: ViewerSinkMap,
     /// Optional capture target selected by the host UI for this session.
@@ -77,6 +84,8 @@ pub fn build_router(
     port: Arc<Mutex<u16>>,
     viewer_sinks: ViewerSinkMap,
     host_peers: HostPeerMap,
+    shared_capture: Arc<SharedCapture>,
+    mobile_capture: Arc<SharedCapture>,
     capture_target_switch_lock: Arc<Mutex<()>>,
 ) -> Router {
     let state = AppState {
@@ -84,6 +93,8 @@ pub fn build_router(
         devices,
         viewer_path: viewer_path.clone(),
         host_peers,
+        shared_capture,
+        mobile_capture,
         viewer_sinks,
         capture_target,
         capture_target_switch_lock,
@@ -253,6 +264,7 @@ async fn handle_socket(
         .insert(connection_id.clone(), out_tx.clone());
     let mut viewer_os = "Unknown OS".to_string();
     let mut viewer_browser = "Unknown browser".to_string();
+    let mut viewer_max_dimension = 1920_u32;
 
     while let Some(msg) = socket.recv().await {
         tracing::info!(
@@ -288,9 +300,16 @@ async fn handle_socket(
                         if let Some(os) = parsed.payload.get("os").and_then(Value::as_str) {
                             viewer_os = os.to_string();
                         }
-                        if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str) {
+                        if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str)
+                        {
                             viewer_browser = browser.to_string();
                         }
+                        viewer_max_dimension = parsed
+                            .payload
+                            .get("maxVideoDimension")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(1920)
+                            .clamp(640, 3840) as u32;
                     }
                     "OFFER" => {
                         tracing::info!("OFFER received, room_id={}", room_id);
@@ -334,11 +353,24 @@ async fn handle_socket(
                                             })
                                         });
                                     if let Some(target) = target {
+                                        let mobile = uses_mobile_capture_profile(
+                                            &viewer_os,
+                                            viewer_max_dimension,
+                                        );
+                                        let mut target = target;
+                                        if mobile {
+                                            target.quality = target.quality.min(0.5);
+                                        }
                                         let fps = crate::webrtc::profile_fps(target.quality);
                                         if let Err(error) = peer_entry.clone().start_sharing(
                                             target,
                                             fps,
-                                            state.capture_target_switch_lock.clone(),
+                                            if mobile {
+                                                state.mobile_capture.clone()
+                                            } else {
+                                                state.shared_capture.clone()
+                                            },
+                                            connection_id.clone(),
                                         ) {
                                             tracing::error!("start_sharing: {error}");
                                         }
@@ -414,6 +446,8 @@ async fn handle_socket(
     state.devices.lock().release_device(&connection_id);
     let _target_switch = state.capture_target_switch_lock.lock();
     if let Some(peer) = state.host_peers.lock().remove(&connection_id) {
+        state.shared_capture.unsubscribe(&connection_id);
+        state.mobile_capture.unsubscribe(&connection_id);
         peer.stop();
     }
 }

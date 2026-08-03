@@ -2,7 +2,9 @@ use axum::http::StatusCode;
 use parking_lot::Mutex;
 use screenmirror_lib::signaling::devices::ConnectedDevicesService;
 use screenmirror_lib::signaling::handlers::HostPeerMap;
-use screenmirror_lib::signaling::handlers::{build_router, parse_message};
+use screenmirror_lib::signaling::handlers::{
+    build_router, parse_message, uses_mobile_capture_profile,
+};
 use screenmirror_lib::signaling::room::Room;
 use screenmirror_lib::signaling::room_id::RoomIDService;
 use std::collections::HashMap;
@@ -36,6 +38,14 @@ fn parse_message_invalid_json() {
     assert!(parse_message("not json").is_err());
 }
 
+#[test]
+fn mobile_capture_profile_matches_mobile_os_or_small_display() {
+    assert!(uses_mobile_capture_profile("iOS", 2732));
+    assert!(uses_mobile_capture_profile("Android", 1920));
+    assert!(uses_mobile_capture_profile("Windows", 1280));
+    assert!(!uses_mobile_capture_profile("macOS", 1920));
+}
+
 #[tokio::test]
 async fn health_endpoint_returns_ok() {
     let room_ids = Arc::new(Mutex::new(RoomIDService::new()));
@@ -55,6 +65,8 @@ async fn health_endpoint_returns_ok() {
         port,
         sinks,
         peers,
+        Arc::new(screenmirror_lib::webrtc::SharedCapture::new()),
+        Arc::new(screenmirror_lib::webrtc::SharedCapture::new()),
         Arc::new(Mutex::new(())),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

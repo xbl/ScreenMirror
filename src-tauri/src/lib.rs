@@ -9,19 +9,13 @@ use tauri::{Emitter, Manager, Runtime};
 
 static LAST_TRAY_CLICK: std::sync::OnceLock<Mutex<Option<Instant>>> = std::sync::OnceLock::new();
 
-fn position_tray_panel(
-    window: &tauri::WebviewWindow,
-    anchor: tauri::PhysicalPosition<f64>,
-) {
+fn position_tray_panel(window: &tauri::WebviewWindow, anchor: tauri::PhysicalPosition<f64>) {
     let x = (anchor.x - 215.0).max(8.0);
     let y = anchor.y + 12.0;
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-fn show_tray_panel(
-    app: &tauri::AppHandle,
-    anchor: Option<tauri::PhysicalPosition<f64>>,
-) {
+fn show_tray_panel(app: &tauri::AppHandle, anchor: Option<tauri::PhysicalPosition<f64>>) {
     if let Some(window) = app.get_webview_window("tray-panel") {
         if let Some(anchor) = anchor {
             position_tray_panel(&window, anchor);
@@ -90,9 +84,7 @@ fn update_tray_for_count<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, count: usi
             }
         }
         Err(error) => {
-            tracing::warn!(
-                "failed to decode tray icon (count={count}, state={state:?}): {error}"
-            );
+            tracing::warn!("failed to decode tray icon (count={count}, state={state:?}): {error}");
         }
     }
 
@@ -102,7 +94,11 @@ fn update_tray_for_count<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, count: usi
     if let Err(error) = tray.set_title(None::<String>) {
         tracing::warn!("failed to clear tray title (count={count}, state={state:?}): {error}");
     }
-    let title = if count == 0 { String::new() } else { count.to_string() };
+    let title = if count == 0 {
+        String::new()
+    } else {
+        count.to_string()
+    };
     if let Err(error) = tray.set_title(Some(title)) {
         tracing::warn!("failed to update tray title (count={count}, state={state:?}): {error}");
     }
@@ -154,6 +150,8 @@ pub fn run() {
         Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>,
     > = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let shared_capture = Arc::new(crate::webrtc::SharedCapture::new());
+    let mobile_capture = Arc::new(crate::webrtc::SharedCapture::new());
     let capture_target_switch_lock = Arc::new(Mutex::new(()));
     let command_state = CommandState {
         room_ids: room_ids.clone(),
@@ -164,6 +162,8 @@ pub fn run() {
         capture_target: capture_target.clone(),
         capture_target_switch_lock: capture_target_switch_lock.clone(),
         host_peers: host_peers.clone(),
+        shared_capture: shared_capture.clone(),
+        mobile_capture: mobile_capture.clone(),
         viewer_sinks: viewer_sinks.clone(),
     };
 
@@ -297,10 +297,12 @@ pub fn run() {
             let ct = capture_target.clone();
             let vs = viewer_sinks.clone();
             let hp = host_peers.clone();
+            let sc = shared_capture.clone();
+            let mc = mobile_capture.clone();
             let ctsl = capture_target_switch_lock.clone();
             let start_port = *pp.lock();
             tauri::async_runtime::spawn(async move {
-                let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp, ctsl);
+                let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp, sc, mc, ctsl);
                 let addr = std::net::SocketAddr::from(([0, 0, 0, 0], start_port));
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => l,

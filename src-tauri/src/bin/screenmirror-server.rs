@@ -61,10 +61,11 @@ async fn main() -> anyhow::Result<()> {
             std::env::set_var("SCREENMIRROR_HOST_IP", &lan);
         }
     }
-    let capture_target = Arc::new(Mutex::new(None::<screenmirror_lib::webrtc::CaptureTarget>));
     let viewer_sinks =
         std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new()));
     let host_peers: HostPeerMap = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let shared_capture = Arc::new(screenmirror_lib::webrtc::SharedCapture::new());
+    let mobile_capture = Arc::new(screenmirror_lib::webrtc::SharedCapture::new());
     let capture_target_switch_lock = Arc::new(Mutex::new(()));
     let app = build_router(
         room_ids,
@@ -74,6 +75,8 @@ async fn main() -> anyhow::Result<()> {
         port.clone(),
         viewer_sinks,
         host_peers,
+        shared_capture,
+        mobile_capture,
         capture_target_switch_lock,
     );
 
