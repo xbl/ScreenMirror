@@ -99,8 +99,8 @@ defineExpose({ checkAndShow });
 .pm-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.7);
-  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--canvas) 64%, transparent);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -111,7 +111,7 @@ defineExpose({ checkAndShow });
 .pm-card {
   width: 100%;
   max-width: 460px;
-  background: var(--surface);
+  background: var(--group);
   border: var(--line);
   border-radius: var(--radius-lg);
   padding: var(--sp-6);
@@ -160,7 +160,7 @@ defineExpose({ checkAndShow });
   align-items: center;
   justify-content: center;
   padding: 10px 18px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   font-size: var(--fs-14);
   font-weight: 500;
   border: 1px solid transparent;
@@ -178,7 +178,7 @@ defineExpose({ checkAndShow });
 
 .btn-accent {
   background: var(--accent);
-  color: #0a1413;
+  color: #fff;
 }
 .btn-accent:hover:not(:disabled) {
   background: var(--accent-strong);

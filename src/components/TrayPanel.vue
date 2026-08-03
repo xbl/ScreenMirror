@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .tray-panel {
   min-height: 100vh;
-  padding: 18px;
+  padding: 16px;
   color: var(--text);
   background: var(--bg);
 }
@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
 
 .tray-head {
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .tray-brand {
@@ -118,8 +118,8 @@ onBeforeUnmount(() => {
 }
 
 .tray-logo {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
 }
 
@@ -135,8 +135,8 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   color: var(--text-strong);
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 500;
+  font-size: 18px;
+  font-weight: 650;
 }
 
 .tray-settings,
@@ -147,8 +147,9 @@ onBeforeUnmount(() => {
   place-items: center;
   color: var(--muted);
   border: 0;
-  border-radius: 50%;
-  background: var(--surface-2);
+  border: var(--line);
+  border-radius: var(--radius-md);
+  background: var(--control);
   cursor: pointer;
 }
 
@@ -166,7 +167,8 @@ onBeforeUnmount(() => {
 .tray-settings:hover,
 .tray-devices:hover {
   color: var(--text-strong);
-  background: var(--surface-3);
+  border-color: var(--accent-line);
+  background: var(--accent-dim);
 }
 
 .tray-devices {
@@ -180,7 +182,7 @@ onBeforeUnmount(() => {
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  color: var(--surface);
+  color: #fff;
   font-size: 9px;
   line-height: 14px;
   text-align: center;
@@ -189,14 +191,14 @@ onBeforeUnmount(() => {
 }
 
 :deep(.qr-card) {
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: 168px minmax(0, 1fr);
   gap: 14px;
-  padding: 14px;
+  padding: 12px;
 }
 
 :deep(.qr-frame) {
-  width: 160px;
-  height: 160px;
+  width: 152px;
+  height: 152px;
   padding: 8px;
 }
 
@@ -214,13 +216,13 @@ onBeforeUnmount(() => {
 }
 
 .tray-source {
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .tray-controls,
 .tray-permission {
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: var(--line);
 }
 
@@ -235,8 +237,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 8px;
   color: var(--danger, #d86b6b);
-  border: 1px solid color-mix(in srgb, var(--danger, #d86b6b) 45%, transparent);
-  background: color-mix(in srgb, var(--danger, #d86b6b) 10%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
 }
 
 .tray-exit svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
@@ -252,7 +254,7 @@ onBeforeUnmount(() => {
   text-align: left;
   border: var(--line);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: var(--control);
 }
 
 .tray-action:hover,
@@ -261,7 +263,7 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 
-.tray-exit:hover { color: #fff; border-color: var(--danger, #d86b6b); background: var(--danger, #d86b6b); }
+.tray-exit:hover { color: #fff; border-color: var(--danger); background: var(--danger); }
 
 .tray-permission {
   display: flex;

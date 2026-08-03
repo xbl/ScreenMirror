@@ -109,8 +109,8 @@ async function onReset() {
 .st-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.6);
-  backdrop-filter: blur(4px);
+  background: color-mix(in srgb, var(--canvas) 64%, transparent);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
@@ -121,12 +121,12 @@ async function onReset() {
   width: 380px;
   max-width: 100%;
   height: 100%;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   border-left: var(--line);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-6);
-  gap: var(--sp-5);
+  padding: var(--sp-5);
+  gap: var(--sp-4);
   animation: slidein var(--motion) ease-out;
 }
 
@@ -144,16 +144,15 @@ async function onReset() {
 }
 
 .st-eyebrow {
-  font-size: var(--fs-12);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--accent);
+  color: var(--text-strong);
+  font-size: var(--fs-18);
+  font-weight: 650;
 }
 
 .st-close {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--fs-18);
   line-height: 1;
@@ -167,7 +166,7 @@ async function onReset() {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding-bottom: var(--sp-4);
+  padding: var(--sp-3) 0;
   border-bottom: var(--line);
 }
 
@@ -188,13 +187,13 @@ async function onReset() {
 }
 
 .st-status {
-  color: var(--warn);
+  color: var(--danger);
   font-size: var(--fs-13);
   font-weight: 500;
 }
 
 .st-status[data-ok='true'] {
-  color: var(--accent);
+  color: var(--success);
 }
 
 .st-icon-button {
@@ -203,15 +202,15 @@ async function onReset() {
   height: 32px;
   place-items: center;
   color: var(--muted);
-  border: 0;
+  border: var(--line);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: var(--control);
   cursor: pointer;
 }
 
 .st-icon-button:hover {
   color: var(--text-strong);
-  background: var(--surface-3);
+  background: var(--accent-dim);
 }
 
 .st-icon-button svg {
@@ -250,7 +249,7 @@ async function onReset() {
   align-items: center;
   justify-content: center;
   padding: 10px 18px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   font-size: var(--fs-14);
   font-weight: 500;
   border: 1px solid transparent;
@@ -262,7 +261,7 @@ async function onReset() {
 
 .btn-accent {
   background: var(--accent);
-  color: #0a1413;
+  color: #fff;
 }
 .btn-accent:hover {
   background: var(--accent-strong);

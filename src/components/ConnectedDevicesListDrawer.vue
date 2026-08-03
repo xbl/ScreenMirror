@@ -63,8 +63,8 @@ watch(
 .drw-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.6);
-  backdrop-filter: blur(4px);
+  background: color-mix(in srgb, var(--canvas) 64%, transparent);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
@@ -75,11 +75,11 @@ watch(
   width: 360px;
   max-width: 100%;
   height: 100%;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   border-left: var(--line);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-6);
+  padding: var(--sp-5);
   gap: var(--sp-4);
   animation: slidein var(--motion) ease-out;
 }
@@ -98,16 +98,15 @@ watch(
 }
 
 .drw-eyebrow {
-  font-size: var(--fs-12);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--accent);
+  color: var(--text-strong);
+  font-size: var(--fs-18);
+  font-weight: 650;
 }
 
 .drw-close {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--fs-18);
   line-height: 1;
@@ -136,10 +135,10 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3);
   border: var(--line);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: var(--group);
 }
 
 .drw-meta {

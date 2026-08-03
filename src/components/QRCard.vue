@@ -258,8 +258,8 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 264px 1fr;
   gap: var(--sp-6);
-  padding: var(--sp-5);
-  background: var(--surface);
+  padding: var(--sp-4);
+  background: var(--group);
   border: var(--line);
   border-radius: var(--radius-lg);
 }
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
 .qr-frame {
   width: 232px;
   height: 232px;
-  background: var(--text);
+  background: #fff;
   border-radius: var(--radius-md);
   padding: 12px;
   display: flex;
@@ -373,7 +373,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 10px 18px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   font-size: var(--fs-14);
   font-weight: 500;
   letter-spacing: -0.005em;
@@ -387,7 +387,7 @@ onBeforeUnmount(() => {
 
 .btn-accent {
   background: var(--accent);
-  color: #0a1413;
+  color: #fff;
 }
 .btn-accent:hover:not(:disabled) {
   background: var(--accent-strong);

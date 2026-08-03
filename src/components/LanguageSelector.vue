@@ -40,19 +40,7 @@ const t = _t;
   border-radius: var(--radius-md);
   padding: 8px 32px 8px 12px;
   font-size: var(--fs-14);
-  background-image: linear-gradient(
-      45deg,
-      transparent 50%,
-      var(--muted) 50%
-    ),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) 50%,
-    calc(100% - 10px) 50%;
-  background-size:
-    6px 6px,
-    6px 6px;
-  background-repeat: no-repeat;
+  min-height: 32px;
 }
 
 .ls:hover {
