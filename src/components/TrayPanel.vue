@@ -2,7 +2,7 @@
   <main class="tray-panel">
     <header class="tray-head">
       <div class="tray-brand">
-        <span class="tray-mark" aria-hidden="true"></span>
+        <img class="tray-logo" :src="logoUrl" alt="Screenmirror" />
         <div>
           <p class="tray-kicker">Screenmirror</p>
           <h1>{{ t('tray.title') }}</h1>
@@ -54,6 +54,7 @@ import SourcePicker from './SourcePicker.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
 import { api } from '../utils/api';
+import logoUrl from '../../src-tauri/icons/icon.png';
 
 const { t } = useI18n();
 const showDevices = ref(false);
@@ -116,12 +117,10 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.tray-mark {
+.tray-logo {
   width: 30px;
   height: 30px;
-  border: 2px solid var(--accent);
-  border-radius: 9px;
-  box-shadow: 5px 5px 0 -2px var(--bg), 5px 5px 0 0 var(--accent);
+  object-fit: contain;
 }
 
 .tray-kicker {

@@ -3,6 +3,7 @@ use crate::signaling::room_id::RoomIDService;
 use crate::webrtc::HostPeer;
 use axum::{
     extract::{
+        connect_info::ConnectInfo,
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
     },
@@ -20,6 +21,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    net::SocketAddr,
 };
 use tokio::sync::mpsc;
 
@@ -210,12 +212,18 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> Response {
     let room_id = q.get("roomId").cloned().unwrap_or_default();
-    ws.on_upgrade(move |socket| handle_socket(socket, state, room_id))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, room_id, remote_addr))
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) {
+async fn handle_socket(
+    mut socket: WebSocket,
+    state: AppState,
+    room_id: String,
+    remote_addr: SocketAddr,
+) {
     // Throttle: 500ms delay before checking roomId (anti-malicious connections).
     tracing::info!("WS handler entered for room={}", room_id);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -243,6 +251,8 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
         .viewer_sinks
         .lock()
         .insert(connection_id.clone(), out_tx.clone());
+    let mut viewer_os = "Unknown OS".to_string();
+    let mut viewer_browser = "Unknown browser".to_string();
 
     while let Some(msg) = socket.recv().await {
         tracing::info!(
@@ -265,9 +275,22 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                     "GET_MY_IP" => {
                         let _ = socket
                             .send(Message::Text(
-                                r#"{"type":"MY_IP","payload":{"ip":"127.0.0.1"}}"#.into(),
+                                serde_json::json!({
+                                    "type": "MY_IP",
+                                    "payload": { "ip": remote_addr.ip().to_string() }
+                                })
+                                .to_string()
+                                .into(),
                             ))
                             .await;
+                    }
+                    "USER_ENTER" => {
+                        if let Some(os) = parsed.payload.get("os").and_then(Value::as_str) {
+                            viewer_os = os.to_string();
+                        }
+                        if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str) {
+                            viewer_browser = browser.to_string();
+                        }
                     }
                     "OFFER" => {
                         tracing::info!("OFFER received, room_id={}", room_id);
@@ -342,9 +365,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, room_id: String) 
                                     let device = crate::signaling::devices::Device {
                                         id: connection_id.clone(),
                                         name: viewer_label,
-                                        ip: "127.0.0.1".into(),
-                                        os: "browser".into(),
-                                        browser: "Chrome".into(),
+                                        ip: remote_addr.ip().to_string(),
+                                        os: viewer_os.clone(),
+                                        browser: viewer_browser.clone(),
                                         room_id: room_id.clone(),
                                         sharing_session_id: room_id.clone(),
                                     };

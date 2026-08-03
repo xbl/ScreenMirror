@@ -314,7 +314,12 @@ pub fn run() {
                 *pp.lock() = bound.port();
                 tracing::info!("signaling server on {}", bound);
                 let _ = handle; // suppress unused warning
-                if let Err(e) = axum::serve(listener, router).await {
+                if let Err(e) = axum::serve(
+                    listener,
+                    router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .await
+                {
                     tracing::error!("server error: {e}");
                 }
             });

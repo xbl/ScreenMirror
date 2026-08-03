@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { getViewerMetadata } from '../lib/signaling';
 
 const props = defineProps<{ ws: WebSocket | null; roomId: string }>();
 const emit = defineEmits<{ (e: 'ready'): void }>();
@@ -95,7 +96,7 @@ async function startNegotiation() {
   });
 
   // Tell the host we're a viewer.
-  send({ type: 'USER_ENTER', payload: { username: 'viewer' } });
+  send({ type: 'USER_ENTER', payload: { username: 'viewer', ...getViewerMetadata() } });
   console.log('[early-offer] USER_ENTER sent');
 
   // Wait past server 500ms throttle before sending OFFER.
