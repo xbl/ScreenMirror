@@ -27,10 +27,10 @@ const TAURI_BIN = process.env.SCREENMIRROR_TAURI_BIN
 const VIEWER_DIST = path.join(ROOT, 'viewer', 'dist');
 const OUT_DIR = path.join(__dirname, 'output');
 const ROOM_ID = 'diag-direct';
-const PORT = 3131;
+const PORT = Number(process.env.SCREENMIRROR_DIAG_PORT ?? 3131);
 const BASE = `http://127.0.0.1:${PORT}`;
 const CHROME_BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const DEBUG_PORT = 9444;
+const DEBUG_PORT = Number(process.env.SCREENMIRROR_DIAG_CHROME_DEBUG_PORT ?? 9444);
 const USER_DATA_DIR = `/tmp/screenmirror-chrome-${Date.now()}`;
 
 function get(p) {
@@ -76,7 +76,7 @@ async function waitForChrome(timeout = 30000) {
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log('[diag] launching Tauri binary...');
-  const tauri = spawn(TAURI_BIN, [], {
+  const tauri = spawn(TAURI_BIN, ['--port', String(PORT)], {
     env: {
       ...process.env,
       RUST_LOG: 'info',

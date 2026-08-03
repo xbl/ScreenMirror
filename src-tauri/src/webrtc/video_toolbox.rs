@@ -49,6 +49,12 @@ pub fn is_keyframe(sample: &[u8]) -> bool {
         .any(|nal| matches!(nal.first().map(|v| v & 0x1f), Some(5)))
 }
 
+/// CoreMedia's sample attachment is authoritative when available. NAL probing
+/// remains the portable fallback for encoders that do not expose a sample.
+pub(crate) fn keyframe_from_markers(nal_contains_idr: bool, coremedia_sync: Option<bool>) -> bool {
+    coremedia_sync.unwrap_or(nal_contains_idr)
+}
+
 pub fn annex_b_to_avcc(sample: &[u8]) -> Result<Vec<u8>, String> {
     let nalus = split_annex_b_nalus(sample);
     if nalus.is_empty() {
@@ -167,6 +173,13 @@ mod tests {
     fn detects_idr_keyframe() {
         assert!(is_keyframe(&[0, 0, 1, 0x65, 1]));
         assert!(!is_keyframe(&[0, 0, 1, 0x41, 1]));
+    }
+
+    #[test]
+    fn coremedia_sync_marker_overrides_nal_probe() {
+        assert!(keyframe_from_markers(false, Some(true)));
+        assert!(!keyframe_from_markers(true, Some(false)));
+        assert!(keyframe_from_markers(true, None));
     }
 
     #[test]

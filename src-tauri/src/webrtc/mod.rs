@@ -262,20 +262,6 @@ fn select_source_index(
     }
 }
 
-const SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS: u8 = 3;
-
-fn should_abandon_screenkit_after_timeouts(consecutive_timeouts: u8) -> bool {
-    consecutive_timeouts >= SCREENKIT_MAX_CONSECUTIVE_TIMEOUTS
-}
-
-fn next_screenkit_timeout_count(consecutive_timeouts: u8, timed_out: bool) -> u8 {
-    if timed_out {
-        consecutive_timeouts.saturating_add(1)
-    } else {
-        0
-    }
-}
-
 /// Enumerate available capture sources (monitors + windows).
 pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     #[cfg(target_os = "macos")]
@@ -498,7 +484,7 @@ pub fn profile_fps(quality: f32) -> u32 {
     if quality >= 0.9 {
         15
     } else if quality >= 0.65 {
-        15
+        30
     } else {
         30
     }
@@ -546,9 +532,12 @@ fn captured_frame_from_screenkit(
     if frame
         .bgra
         .as_ref()
-        .map_or(true, |bgra| bgra.len() < stride.saturating_mul(height))
+        .is_some_and(|bgra| bgra.len() < stride.saturating_mul(height))
     {
         return Err("ScreenCaptureKit frame buffer is shorter than its stride".into());
+    }
+    if frame.bgra.is_none() && frame.iosurface.is_none() {
+        return Err("ScreenCaptureKit frame has neither BGRA nor IOSurface data".into());
     }
     let _ = quality;
     Ok(CapturedFrame {
@@ -762,7 +751,12 @@ pub fn spawn_video_capture_loop(
                             fps.max(1),
                             kbps,
                         ) {
-                            Ok(value) => iosurface_encoder = Some(value),
+                            Ok(value) => {
+                                tracing::info!(
+                                    "using direct ScreenCaptureKit IOSurface -> VideoToolbox encoding"
+                                );
+                                iosurface_encoder = Some(value);
+                            }
                             Err(error) => {
                                 tracing::warn!("native IOSurface encoder unavailable; falling back to FFmpeg: {error}");
                                 frame.rgba =
@@ -775,12 +769,12 @@ pub fn spawn_video_capture_loop(
                         match native_encoder.encode(&native_frame) {
                             Ok(encoded) => Some(Ok(encoded)),
                             Err(error) => {
-                                tracing::warn!("native IOSurface encode failed; falling back to FFmpeg: {error}");
-                                frame.rgba =
-                                    screenkit_frame_to_rgba(&native_frame, target.quality).ok();
-                                iosurface_encoder = None;
-                                iosurface_disabled = true;
-                                None
+                                // Direct frames intentionally have no CPU BGRA
+                                // copy. Dropping one failed frame is preferable
+                                // to permanently falling back to a slow path
+                                // that cannot consume later IOSurfaces.
+                                tracing::warn!("native IOSurface encode failed; dropping frame: {error}");
+                                Some(Err(error.to_string()))
                             }
                         }
                     } else {
@@ -964,7 +958,6 @@ pub fn spawn_video_capture_loop(
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
         #[cfg(all(target_os = "macos", not(feature = "screenkit")))]
         let mut screenkit_capture: Option<ScreenKitCapture> = None;
-        let mut screenkit_consecutive_timeouts = 0_u8;
         let mut frames: u32 = 0;
         let mut unavailable_source_errors = 0_u8;
         while r.load(std::sync::atomic::Ordering::Relaxed) {
@@ -976,24 +969,12 @@ pub fn spawn_video_capture_loop(
             let captured = if let Some(screenkit_result) = screenkit_result {
                 match screenkit_result {
                     Ok(frame) => {
-                        screenkit_consecutive_timeouts =
-                            next_screenkit_timeout_count(screenkit_consecutive_timeouts, false);
                         captured_frame_from_screenkit(frame, target.quality)
                     }
-                    Err(ScreenKitError::Unavailable(_)) => {
-                        screenkit_consecutive_timeouts =
-                            next_screenkit_timeout_count(screenkit_consecutive_timeouts, true);
-                        if should_abandon_screenkit_after_timeouts(screenkit_consecutive_timeouts) {
-                            tracing::warn!(
-                                "ScreenCaptureKit timed out {} consecutive intervals; falling back to xcap",
-                                screenkit_consecutive_timeouts
-                            );
-                            if let Some(capture) = screenkit_capture.take() {
-                                capture.stop();
-                            }
-                        }
-                        continue;
-                    }
+                    // ScreenCaptureKit is change-driven. A timeout means no
+                    // new content, not that the stream has failed; retaining
+                    // it avoids falling back to slow full-screen xcap polls.
+                    Err(ScreenKitError::Unavailable(_)) => continue,
                     Err(ScreenKitError::Stopped) => {
                         tracing::warn!("ScreenCaptureKit stopped; falling back to xcap");
                         screenkit_capture = None;
@@ -1045,8 +1026,8 @@ pub fn spawn_video_capture_loop(
             let capture_elapsed = capture_started.elapsed();
             if frames < 3 || capture_elapsed >= Duration::from_millis(100) {
                 tracing::info!(
-                    "video capture: capture/resize elapsed={:?}",
-                    capture_elapsed
+                    source_wait = ?capture_elapsed,
+                    "video capture: source frame wait"
                 );
             }
             match captured {
@@ -1096,10 +1077,10 @@ pub struct CaptureHandle {
 mod tests {
     use super::{
         begin_preview_request, capture_bitrate_kbps, capture_dimensions, finish_preview_request,
-        is_shareable_window, legacy_capture_source_id, next_screenkit_timeout_count,
+        is_shareable_window, legacy_capture_source_id,
         normalize_captured_rgba_with_max_dim, normalize_encoder_dimensions, preview_dimensions,
         preview_from_capture_result, profile_fps, profile_max_dim, select_source_index,
-        should_abandon_screenkit_after_timeouts, store_preview_if_current, DisplayPreviewCache,
+        store_preview_if_current, DisplayPreviewCache,
         PreviewCacheKey,
     };
     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -1139,7 +1120,7 @@ mod tests {
     #[test]
     fn high_and_ultra_profiles_prioritize_readable_frames_at_fifteen_fps() {
         assert_eq!(profile_fps(0.5), 30);
-        assert_eq!(profile_fps(0.75), 15);
+        assert_eq!(profile_fps(0.75), 30);
         assert_eq!(profile_fps(1.0), 15);
     }
 
@@ -1224,13 +1205,6 @@ mod tests {
             .expect_err("out of range index must fail");
 
         assert_eq!(error, "screen index 1 out of range");
-    }
-
-    #[test]
-    fn screenkit_timeout_threshold_allows_three_missed_intervals() {
-        assert!(!should_abandon_screenkit_after_timeouts(2));
-        assert!(should_abandon_screenkit_after_timeouts(3));
-        assert_eq!(next_screenkit_timeout_count(2, false), 0);
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //!
 //! The implementation is feature-gated so the normal xcap build keeps its
 //! existing dependency and linker surface.  On macOS with `screenkit`, BGRA
-//! frames are copied into an IOSurface and submitted to a persistent hardware
-//! `VTCompressionSession` through the `videotoolbox` crate.
+//! frames are submitted from their ScreenCaptureKit IOSurface to a persistent
+//! hardware `VTCompressionSession` through the `videotoolbox` crate.
 
 use crate::webrtc::screencapturekit_capture::ScreenKitFrame;
 use crate::webrtc::video_toolbox::H264EncodedFrame;
@@ -28,13 +28,45 @@ mod native {
     use videotoolbox::compression::CompressionSession;
     use videotoolbox::session::Codec;
 
+    fn coremedia_sample_is_sync(sample: &apple_cf::cm::CMSampleBuffer) -> Option<bool> {
+        // kCMSampleAttachmentKey_NotSync is absent for a sync sample. Read
+        // the attachment directly because apple-cf intentionally exposes only
+        // the framework-neutral CMSampleBuffer surface.
+        unsafe {
+            let attachments =
+                apple_cf::raw::CMSampleBufferGetSampleAttachmentsArray(sample.as_ptr().cast(), 0);
+            if attachments.is_null() || apple_cf::raw::CFArrayGetCount(attachments) == 0 {
+                return None;
+            }
+            let dictionary = apple_cf::raw::CFArrayGetValueAtIndex(attachments, 0);
+            if dictionary.is_null() {
+                return None;
+            }
+            let mut not_sync = std::ptr::null();
+            let present = apple_cf::raw::CFDictionaryGetValueIfPresent(
+                dictionary.cast(),
+                apple_cf::raw::kCMSampleAttachmentKey_NotSync.cast(),
+                &mut not_sync,
+            );
+            if present == 0 {
+                return Some(true);
+            }
+            if not_sync.is_null()
+                || apple_cf::raw::CFGetTypeID(not_sync) != apple_cf::raw::CFBooleanGetTypeID()
+            {
+                return None;
+            }
+            Some(apple_cf::raw::CFBooleanGetValue(not_sync.cast()) == 0)
+        }
+    }
+
     #[derive(Debug)]
     pub struct Encoder {
         width: u32,
         height: u32,
         fps: u32,
         session: CompressionSession,
-        surface: IOSurface,
+        fallback_surface: Option<IOSurface>,
         pts: i64,
         sps_pps: Vec<u8>,
     }
@@ -57,19 +89,12 @@ mod native {
                 .with_max_keyframe_interval((fps.max(1) * 2) as i32)
                 .build()
                 .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
-            let surface = IOSurface::create(
-                width as usize,
-                height as usize,
-                u32::from_be_bytes(*b"BGRA"),
-                4,
-            )
-            .ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface::create failed".into()))?;
             Ok(Self {
                 width,
                 height,
                 fps: fps.max(1),
                 session,
-                surface,
+                fallback_surface: None,
                 pts: 0,
                 sps_pps: Vec::new(),
             })
@@ -79,10 +104,6 @@ mod native {
             &mut self,
             frame: &ScreenKitFrame,
         ) -> Result<H264EncodedFrame, IOSurfaceEncoderError> {
-            let bgra = frame
-                .bgra
-                .as_deref()
-                .ok_or(IOSurfaceEncoderError::MissingFrameData)?;
             let expected_row = self.width as usize * 4;
             if frame.width != self.width
                 || frame.height != self.height
@@ -93,34 +114,48 @@ mod native {
                     frame.width, frame.height, self.width, self.height
                 )));
             }
-            let mut guard = self
-                .surface
-                .lock(IOSurfaceLockOptions::from_bits(0))
-                .map_err(|e| {
-                    IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}"))
+            let encoded = if let Some(surface) = frame.iosurface.as_ref() {
+                self.session.encode(surface, (self.pts, self.fps as i32))
+            } else {
+                let bgra = frame
+                    .bgra
+                    .as_deref()
+                    .ok_or(IOSurfaceEncoderError::MissingFrameData)?;
+                let surface = self.fallback_surface.get_or_insert_with(|| {
+                    IOSurface::create(
+                        self.width as usize,
+                        self.height as usize,
+                        u32::from_be_bytes(*b"BGRA"),
+                        4,
+                    )
+                    .expect("validated IOSurface dimensions")
+                });
+                let mut guard = surface
+                    .lock(IOSurfaceLockOptions::from_bits(0))
+                    .map_err(|e| {
+                        IOSurfaceEncoderError::Native(format!("IOSurface lock failed: {e}"))
+                    })?;
+                let dst_stride = guard.bytes_per_row();
+                let dst = guard.as_slice_mut().ok_or_else(|| {
+                    IOSurfaceEncoderError::Native("IOSurface is not writable".into())
                 })?;
-            let dst_stride = guard.bytes_per_row();
-            let dst = guard
-                .as_slice_mut()
-                .ok_or_else(|| IOSurfaceEncoderError::Native("IOSurface is not writable".into()))?;
-            let src_stride = frame.bytes_per_row as usize;
-            for row in 0..self.height as usize {
-                let src_start = row * src_stride;
-                let dst_start = row * dst_stride;
-                let src_end = src_start + expected_row;
-                let dst_end = dst_start + expected_row;
-                if src_end > bgra.len() || dst_end > dst.len() {
-                    return Err(IOSurfaceEncoderError::Native(
-                        "BGRA frame buffer is truncated".into(),
-                    ));
+                let src_stride = frame.bytes_per_row as usize;
+                for row in 0..self.height as usize {
+                    let src_start = row * src_stride;
+                    let dst_start = row * dst_stride;
+                    let src_end = src_start + expected_row;
+                    let dst_end = dst_start + expected_row;
+                    if src_end > bgra.len() || dst_end > dst.len() {
+                        return Err(IOSurfaceEncoderError::Native(
+                            "BGRA frame buffer is truncated".into(),
+                        ));
+                    }
+                    dst[dst_start..dst_end].copy_from_slice(&bgra[src_start..src_end]);
                 }
-                dst[dst_start..dst_end].copy_from_slice(&bgra[src_start..src_end]);
+                drop(guard);
+                self.session.encode(surface, (self.pts, self.fps as i32))
             }
-            drop(guard);
-            let encoded = self
-                .session
-                .encode(&self.surface, (self.pts, self.fps as i32))
-                .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
+            .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
             self.pts = self.pts.saturating_add(1);
             if self.sps_pps.is_empty() {
                 if let Some(sample) = encoded.cm_sample_buffer() {
@@ -156,8 +191,14 @@ mod native {
                     }
                 }
             }
+            let coremedia_sync = encoded
+                .cm_sample_buffer()
+                .and_then(coremedia_sample_is_sync);
             let mut data = avcc_to_annex_b(&encoded.data).unwrap_or(encoded.data);
-            let keyframe = crate::webrtc::video_toolbox::is_keyframe(&data);
+            let keyframe = crate::webrtc::video_toolbox::keyframe_from_markers(
+                crate::webrtc::video_toolbox::is_keyframe(&data),
+                coremedia_sync,
+            );
             if keyframe {
                 let has_sps = crate::webrtc::video_toolbox::split_annex_b_nalus(&data)
                     .iter()

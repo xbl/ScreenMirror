@@ -16,15 +16,17 @@ use super::CaptureTarget;
 
 /// A captured ScreenCaptureKit sample in a transport-friendly representation.
 ///
-/// `bgra` is populated by the readback path.  `iosurface` is an opaque native
-/// handle reserved for the zero-copy VideoToolbox path; it is intentionally a
-/// `usize` here so non-macOS callers never need to link CoreVideo types.
+/// `iosurface` is retained for the direct VideoToolbox path. `bgra` is only
+/// populated when ScreenCaptureKit cannot provide an IOSurface.
 #[derive(Debug, Clone)]
 pub struct ScreenKitFrame {
     pub width: u32,
     pub height: u32,
     pub bytes_per_row: u32,
     pub bgra: Option<Vec<u8>>,
+    #[cfg(all(target_os = "macos", feature = "screenkit"))]
+    pub iosurface: Option<apple_cf::iosurface::IOSurface>,
+    #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
     pub iosurface: Option<usize>,
     pub captured_at: Instant,
 }
@@ -154,6 +156,15 @@ pub fn start_screen_capture(
         source_height,
         super::profile_max_dim(target.quality),
     );
+    tracing::info!(
+        target = ?target.kind,
+        source_width,
+        source_height,
+        capture_width,
+        capture_height,
+        fps,
+        "ScreenCaptureKit configured source-scale capture"
+    );
     let mut config = SCStreamConfiguration::new()
         .with_width(capture_width)
         .with_height(capture_height)
@@ -187,35 +198,43 @@ pub fn start_screen_capture(
         let width = pixel_buffer.width();
         let height = pixel_buffer.height();
         let bytes_per_row = pixel_buffer.bytes_per_row();
-        let Ok(guard) = pixel_buffer.lock_read_only() else {
-            return;
-        };
-        let base = guard.base_address();
-        if base.is_null() || width == 0 || height == 0 || bytes_per_row < width.saturating_mul(4) {
+        if width == 0 || height == 0 || bytes_per_row < width.saturating_mul(4) {
             return;
         }
-        let row_bytes = width.saturating_mul(4);
-        let mut bgra = vec![0u8; row_bytes.saturating_mul(height)];
-        for row in 0usize..height {
-            // SAFETY: CoreVideo keeps the base address valid while `guard` is alive;
-            // each row is bounded by the reported stride and copied into our owned Vec.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    base.add(row.saturating_mul(bytes_per_row)),
-                    bgra.as_mut_ptr().add(row.saturating_mul(row_bytes)),
-                    row_bytes,
-                );
+        // ScreenCaptureKit normally provides an IOSurface. Retain it and
+        // hand it directly to VideoToolbox; copying full Retina frames here
+        // is what previously made capture time scale into hundreds of ms.
+        let iosurface = pixel_buffer.io_surface().map(|surface| surface.clone());
+        let bgra = if iosurface.is_none() {
+            let Ok(guard) = pixel_buffer.lock_read_only() else {
+                return;
+            };
+            let base = guard.base_address();
+            if base.is_null() {
+                return;
             }
-        }
-        drop(guard);
+            let row_bytes = width.saturating_mul(4);
+            let mut bytes = vec![0u8; row_bytes.saturating_mul(height)];
+            for row in 0usize..height {
+                // SAFETY: the lock keeps the base address valid for this copy.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        base.add(row.saturating_mul(bytes_per_row)),
+                        bytes.as_mut_ptr().add(row.saturating_mul(row_bytes)),
+                        row_bytes,
+                    );
+                }
+            }
+            Some(bytes)
+        } else {
+            None
+        };
         let frame = ScreenKitFrame {
             width: width as u32,
             height: height as u32,
-            bytes_per_row: row_bytes as u32,
-            bgra: Some(bgra),
-            iosurface: pixel_buffer
-                .io_surface()
-                .map(|surface| surface.as_ptr() as usize),
+            bytes_per_row: bytes_per_row as u32,
+            bgra,
+            iosurface,
             // `display_time` is a mach-absolute timestamp; Instant::now() is
             // monotonic and is the timestamp consumed by the existing encoder age gate.
             captured_at: Instant::now(),

@@ -111,10 +111,10 @@ mod tests {
             kind: CaptureKind::TestPattern,
             id: 0,
             source_id: None,
-            quality: 0.95,
+            quality: 0.75,
         };
 
-        assert_eq!(capture_fps_for_target(&active_target), 15);
+        assert_eq!(capture_fps_for_target(&active_target), 30);
     }
 
     #[test]
