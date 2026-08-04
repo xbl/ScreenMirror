@@ -2,6 +2,12 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    if env::var_os("CARGO_FEATURE_SCREENKIT").is_some() {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+        tauri_build::build();
+        return;
+    }
+
     let ffmpeg_dir = env::var("FFMPEG_DIR").unwrap_or_else(|_| "/usr/local/opt/ffmpeg".to_string());
     let ffmpeg_include = PathBuf::from(&ffmpeg_dir).join("include");
 

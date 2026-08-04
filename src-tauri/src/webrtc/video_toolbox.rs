@@ -1,11 +1,4 @@
-//! H.264 helpers and the re-exported `NativeVideoEncoder`.
-//!
-//! `VideoEncoder` is now a thin alias for the bindgen-driven
-//! [`NativeVideoEncoder`](crate::webrtc::video_toolbox_native::NativeVideoEncoder)
-//! which wraps a persistent `AVCodecContext` instead of spawning per-frame
-//! `ffmpeg` processes. The Annex B / AVCC helpers and their unit tests
-//! remain here because `NativeVideoEncoder` (and the rest of the WebRTC
-//! pipeline) depends on them.
+//! H.264 helpers and the selected VideoToolbox encoder.
 
 #[derive(Debug, Clone)]
 pub struct H264EncodedFrame {
@@ -157,7 +150,50 @@ pub fn normalize_h264_extradata_to_annex_b(raw: &[u8]) -> Vec<u8> {
 pub use crate::webrtc::video_toolbox_iosurface::{
     is_available as iosurface_encoder_available, IOSurfaceEncoderError, IOSurfaceVideoEncoder,
 };
+#[cfg(not(feature = "screenkit"))]
 pub use crate::webrtc::video_toolbox_native::NativeVideoEncoder as VideoEncoder;
+
+#[cfg(feature = "screenkit")]
+pub struct VideoEncoder {
+    inner: IOSurfaceVideoEncoder,
+}
+
+#[cfg(feature = "screenkit")]
+impl VideoEncoder {
+    pub fn new(width: u32, height: u32, fps: u32, bitrate_kbps: u32) -> Result<Self, String> {
+        IOSurfaceVideoEncoder::new(width, height, fps, bitrate_kbps)
+            .map(|inner| Self { inner })
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        self.inner.dimensions()
+    }
+
+    pub fn encode(&mut self, rgba: &[u8]) -> Result<H264EncodedFrame, String> {
+        let (width, height) = self.dimensions();
+        let expected = width as usize * height as usize * 4;
+        if rgba.len() != expected {
+            return Err(format!(
+                "expected {expected} RGBA bytes, got {}",
+                rgba.len()
+            ));
+        }
+        let mut bgra = rgba.to_vec();
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let frame = crate::webrtc::ScreenKitFrame {
+            width,
+            height,
+            bytes_per_row: width * 4,
+            bgra: Some(bgra),
+            iosurface: None,
+            captured_at: std::time::Instant::now(),
+        };
+        self.inner.encode(&frame).map_err(|error| error.to_string())
+    }
+}
 
 #[cfg(test)]
 mod tests {

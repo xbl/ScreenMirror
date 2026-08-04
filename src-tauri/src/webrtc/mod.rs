@@ -9,11 +9,13 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+#[cfg(not(feature = "screenkit"))]
 pub mod ffi;
 pub mod host;
 pub mod screencapturekit_capture;
 pub mod video_toolbox;
 pub mod video_toolbox_iosurface;
+#[cfg(not(feature = "screenkit"))]
 pub mod video_toolbox_native;
 
 pub use host::{HostPeer, SharedCapture};

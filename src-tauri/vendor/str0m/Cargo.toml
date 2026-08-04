@@ -98,4 +98,3 @@ _internal_dont_use_log_stats = []
 
 [target."cfg(unix)".dependencies.sha-1]
 version = "0.10.1"
-features = ["asm"]

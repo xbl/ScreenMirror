@@ -286,10 +286,14 @@ pub fn run() {
                 }
             });
 
-            let viewer_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("viewer")
-                .join("dist");
+            let viewer_path = if cfg!(debug_assertions) {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("viewer")
+                    .join("dist")
+            } else {
+                app.path().resource_dir()?.join("viewer").join("dist")
+            };
             let rr = room_ids.clone();
             let dd = devices.clone();
             let pp = port.clone();

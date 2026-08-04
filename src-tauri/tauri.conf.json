@@ -26,6 +26,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../viewer/dist/": "viewer/dist/"
+    },
     "category": "Utility"
   }
 }
