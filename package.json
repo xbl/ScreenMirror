@@ -22,7 +22,7 @@
     "prepare": "husky",
     "tauri": "tauri",
     "tauri:dev": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri dev --features screenkit",
-    "tauri:build": "tauri build",
+    "tauri:build": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri build --features screenkit",
     "tauri:dev:screenkit": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri dev --features screenkit",
     "tauri:build:screenkit": "MACOSX_DEPLOYMENT_TARGET=13.0 RUSTFLAGS='-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx' SCREENMIRROR_USE_IOSURFACE=1 tauri build --features screenkit",
     "test": "vitest run",
