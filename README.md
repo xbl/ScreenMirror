@@ -1,53 +1,94 @@
-# Screenmirror
+# ScreenMirror
 
-A Tauri 2 + Vue 3 + TypeScript screen sharing application written in Rust without Electron.
+把身边任何能打开浏览器的设备，变成 Mac 的低延迟第二块屏幕。
 
-## Features
+ScreenMirror 通过局域网分享 Mac 的主屏幕、扩展显示器或单个 App 窗口。观看设备无需安装应用、无需注册账号，扫描二维码即可开始使用。
 
-- Screen / window capture on macOS
-- Browser viewer via WebRTC and native HTML video
-- Local-network signaling via WebSocket and JSON messages
-- Single viewer slot
-- QR-code-based connection URL
-- CLI flags: `--ip <addr>` and `--port <n>`
-- English and Simplified Chinese interfaces
+## 适合用来做什么
 
-## Privacy
+- 把平板、旧电脑或其他浏览器设备变成临时副屏。
+- 在另一台设备上持续显示资料、仪表盘、演示内容或开发日志。
+- 只分享指定 App 或窗口，不暴露桌面上的其他内容。
+- 在同一局域网内快速投屏，不依赖云端中转服务。
 
-Screenmirror keeps signaling and media on the local network. It does not collect usage data, run tracking scripts, or send frames to third parties.
+## 产品特点
 
-## Quick start
+### 浏览器就是接收端
 
-```bash
-npm install
-cd viewer && npm install && cd ..
-cd src-tauri && cargo fetch && cd ..
-npm run tauri:dev
-```
+观看设备只需要现代浏览器。打开二维码对应的地址后，画面会使用浏览器原生播放器显示，并支持全屏播放。
 
-Open the app and scan the QR code with a device on the same Wi-Fi.
+### 灵活选择分享内容
 
-## Tests
+ScreenMirror 支持三类分享源：
 
-```bash
-cd src-tauri && cargo test
-npm run typecheck
-npm run build
-cd viewer && npm run typecheck && npm run build
-```
+- **整个屏幕**：分享 Mac 的主显示器。
+- **扩展显示器**：把已连接的扩展屏作为独立工作区分享。
+- **窗口或 App**：只分享一个正在运行的窗口。
 
-## Build
+分享过程中可以在 Mac 上更换来源，不需要让观看端重新安装或配置。
 
-```bash
-npm run tauri:build
-```
+### 为局域网第二屏优化
 
-## CLI flags
+ScreenMirror 优先保证操作跟手和内容可读。网络或设备处理速度不足时，会优先丢弃过期画面，避免因为不断积压旧帧而产生越来越明显的延迟。
 
-```bash
-./screenmirror --ip 192.168.1.100 --port 3133
-```
+### 画质由 Mac 统一控制
 
-## Architecture
+| 模式 | 适合场景 |
+| --- | --- |
+| 均衡 | 手机、平板或性能有限的观看设备 |
+| 高画质 | 默认模式，兼顾文字清晰度和浏览器解码压力 |
+| 超高画质 | 高分辨率显示器和性能较强的观看设备 |
 
-The host captures a screen or window with `xcap`, encodes frames as H.264 with the macOS VideoToolbox encoder, and sends them through a negotiated WebRTC video track. The browser binds the received `MediaStream` to a native `<video>` element.
+画质选择位于 Mac 端，因为分享画面的分辨率和流畅度由发送端决定。
+
+## 使用方法
+
+1. 在 Mac 上启动 ScreenMirror。
+2. 首次使用时，按照提示授予 macOS“屏幕录制”权限。
+3. 在菜单栏面板中选择要分享的屏幕、扩展显示器或 App 窗口。
+4. 确保观看设备和 Mac 连接到同一个局域网。
+5. 使用观看设备扫描二维码，或手动打开面板中的连接地址。
+6. 连接后可在 Mac 上随时更换分享内容和画质。
+
+## 使用要求
+
+### Mac
+
+- macOS 13 或更高版本。
+- 已授予屏幕录制权限。
+- 与观看设备处于同一 Wi-Fi 或有线局域网。
+
+### 观看设备
+
+- 能运行现代浏览器。
+- 能访问 Mac 所在的局域网。
+- 不需要安装 ScreenMirror，也不需要账号。
+
+访客网络隔离、VPN、企业网络策略或防火墙可能阻止设备访问 Mac。即使两台设备显示相同的 Wi-Fi 名称，也可能无法直接通信。
+
+## 隐私
+
+ScreenMirror 按照本地网络工具的方式工作：
+
+- 不需要用户账号。
+- 不包含使用行为分析或跟踪脚本。
+- 不通过 ScreenMirror 云端转发画面。
+- 不把屏幕内容发送给第三方服务。
+
+能够访问当前连接地址的设备可能发起观看请求。请把二维码和连接地址视为临时访问凭证，并只在可信局域网中使用。
+
+## 当前产品边界
+
+ScreenMirror 是局域网扩展显示工具，不是远程桌面服务。目前不提供：
+
+- 跨互联网的画面中转；
+- 从观看端远程控制 Mac；
+- 系统声音或麦克风共享；
+- 云端历史记录；
+- 跨网络自动发现设备。
+
+实际清晰度和延迟会受到 Mac 性能、分享分辨率、观看设备解码能力以及局域网质量影响。
+
+## 项目主页
+
+https://github.com/xbl/ScreenMirror
