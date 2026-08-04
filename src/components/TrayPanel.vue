@@ -118,8 +118,8 @@ onBeforeUnmount(() => {
 }
 
 .tray-logo {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   object-fit: contain;
 }
 
