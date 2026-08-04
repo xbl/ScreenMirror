@@ -1,8 +1,8 @@
-# Screenmirror Warm Utility Design System
+# ScreenMirror Warm Utility Design System
 
 ## Goal
 
-Make Screenmirror feel like a focused macOS menu-bar utility rather than a web dashboard. The host and browser Viewer share one visual language built from black, white, warm neutrals, and a restrained orange accent. The interface follows the operating system light or dark appearance automatically.
+Make ScreenMirror feel like a focused macOS menu-bar utility rather than a web dashboard. The host and browser Viewer share one visual language built from black, white, warm neutrals, and a restrained orange accent. The interface follows the operating system light or dark appearance automatically.
 
 The redesign must preserve all existing capture, source-switching, connection, permission, and playback behavior.
 

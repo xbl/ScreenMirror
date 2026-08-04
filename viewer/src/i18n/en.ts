@@ -1,6 +1,6 @@
 export default {
   viewer: {
-    title: 'Screenmirror Viewer',
+    title: 'ScreenMirror Viewer',
     reinitiate: 'Re-initiate connection',
     waitingForAllow: 'Waiting for host to allow your device...',
     waitingForSource: 'Waiting for host to choose a source...',
@@ -22,7 +22,7 @@ export default {
   },
   privacy: {
     title: 'Privacy',
-    intro: 'Screenmirror mirrors your screen over the local network. We do not need any data to do this.',
+    intro: 'ScreenMirror mirrors your screen over the local network. We do not need any data to do this.',
     bullet1: 'No analytics, telemetry, or third-party tracking.',
     bullet2: 'Frames are transferred peer-to-peer over WebRTC; the host does not store them.',
     bullet3: 'No data is sent to a third party.',

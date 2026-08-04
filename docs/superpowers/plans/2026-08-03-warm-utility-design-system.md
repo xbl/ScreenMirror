@@ -122,7 +122,7 @@ git commit -m "feat: apply warm utility styling to host surfaces"
 
 - [ ] **Step 1: Preserve the playback invariants before editing.** Run `cd viewer && npm run lint && npm run typecheck && npm run build`. Do not change `pendingStream` ordering, the `flush: 'post'` watcher, the two-level `v-if`, or the no-frame watchdog.
 
-- [ ] **Step 2: Replace connection prompt styling.** Use a small orange Screenmirror mark, system typography, a single status line, and one reconnect action. Remove serif display styling and cyan tokens. Keep the existing i18n text and emitted `reinitiate` event.
+- [ ] **Step 2: Replace connection prompt styling.** Use a small orange ScreenMirror mark, system typography, a single status line, and one reconnect action. Remove serif display styling and cyan tokens. Keep the existing i18n text and emitted `reinitiate` event.
 
 - [ ] **Step 3: Replace player styling only.** Keep `<video controls playsinline muted>` and event handlers unchanged. Use black/near-black canvas, `object-fit: contain`, and a compact bottom overlay only for state text and the fullscreen/native controls context. Do not add a custom fake video control bar that can conflict with native fullscreen. Disconnected and connecting states remain centered and use semantic orange/red status with the existing reconnect button.
 

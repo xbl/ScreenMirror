@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Screenmirror",
+  "productName": "ScreenMirror",
   "version": "0.1.0",
   "identifier": "dev.screenmirror.app",
   "build": {

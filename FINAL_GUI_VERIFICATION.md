@@ -1,7 +1,7 @@
 # Final Verification Report
 
 **Date:** 2026-07-22
-**Project:** Screenmirror
+**Project:** ScreenMirror
 **Objective:** Verify the host, signaling service, H.264 capture path, and native browser video playback.
 
 ## Verified

@@ -1,9 +1,9 @@
 ---
 name: automated-testing
-description: Test Screenmirror Vue, Rust, WebRTC, and Tauri boundaries with the narrowest reliable layer.
+description: Test ScreenMirror Vue, Rust, WebRTC, and Tauri boundaries with the narrowest reliable layer.
 ---
 
-# Screenmirror Automated Testing
+# ScreenMirror Automated Testing
 
 Use this skill when changing or debugging `src/`, `viewer/`, `src-tauri/`, `tests/`, `src-tauri/tests/`, or `tools/`, and when validating a streaming, signaling, playback, or permission workflow.
 

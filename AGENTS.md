@@ -16,7 +16,7 @@ No Electron. No analytics. English + Simplified Chinese only.
 
 ## Product Positioning & Priorities
 
-Screenmirror is a **local-network extended-display tool**: any device that can
+ScreenMirror is a **local-network extended-display tool**: any device that can
 open a browser should be usable as a responsive second screen. Treat the LAN as
 the normal deployment environment, not as a constrained WAN link.
 

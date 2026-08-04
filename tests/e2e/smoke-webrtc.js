@@ -103,7 +103,7 @@ async function main() {
     console.log('[smoke-webrtc] server up');
 
     const spa = await get(`/${TEST_ROOM}`);
-    check('SPA fallback for room URL', spa.status === 200 && spa.body.includes('Screenmirror'));
+    check('SPA fallback for room URL', spa.status === 200 && spa.body.includes('ScreenMirror'));
 
     // Connect WS as viewer.
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/api/ws?roomId=${TEST_ROOM}`);

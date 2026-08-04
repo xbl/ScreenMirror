@@ -2,9 +2,9 @@
   <main class="tray-panel">
     <header class="tray-head">
       <div class="tray-brand">
-        <img class="tray-logo" :src="logoUrl" alt="Screenmirror" />
+        <img class="tray-logo" :src="logoUrl" alt="ScreenMirror" />
         <div>
-          <p class="tray-kicker">Screenmirror</p>
+          <p class="tray-kicker">ScreenMirror</p>
           <h1>{{ t('tray.title') }}</h1>
         </div>
       </div>

@@ -28,7 +28,7 @@ fn show_tray_panel(app: &tauri::AppHandle, anchor: Option<tauri::PhysicalPositio
 
     let url = tauri::WebviewUrl::App("index.html?tray=1".into());
     let result = tauri::WebviewWindowBuilder::new(app, "tray-panel", url)
-        .title("Screenmirror")
+        .title("ScreenMirror")
         .inner_size(430.0, 545.0)
         .min_inner_size(380.0, 500.0)
         .resizable(false)
@@ -250,7 +250,7 @@ pub fn run() {
                 // Initialize the macOS title slot so later `set_title` calls
                 // (the live viewer count) are rendered beside the icon.
                 .title("")
-                .tooltip("Screenmirror")
+                .tooltip("ScreenMirror")
                 .on_tray_icon_event(|tray, event| {
                     use tauri::tray::TrayIconEvent;
                     if let TrayIconEvent::Click {

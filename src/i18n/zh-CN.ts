@@ -1,8 +1,8 @@
 export default {
   app: {
-    title: 'Screenmirror',
+    title: 'ScreenMirror',
     reset: '重置',
-    exit: '退出 Screenmirror',
+    exit: '退出 ScreenMirror',
   },
   tray: {
     title: '快速投屏',
@@ -96,7 +96,7 @@ export default {
     unknown: '发生未知错误',
   },
   viewer: {
-    title: 'Screenmirror 观看端',
+    title: 'ScreenMirror 观看端',
     reinitiate: '重新连接',
     waitingForAllow: '等待主机允许连接…',
     waitingForSource: '等待主机选择分享源…',

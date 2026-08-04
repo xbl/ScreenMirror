@@ -1,8 +1,8 @@
 export default {
   app: {
-    title: 'Screenmirror',
+    title: 'ScreenMirror',
     reset: 'Reset',
-    exit: 'Quit Screenmirror',
+    exit: 'Quit ScreenMirror',
   },
   tray: {
     title: 'Quick share',
@@ -97,7 +97,7 @@ export default {
     unknown: 'An unknown error occurred',
   },
   viewer: {
-    title: 'Screenmirror viewer',
+    title: 'ScreenMirror viewer',
     reinitiate: 'Reconnect',
     waitingForAllow: 'Waiting for host to allow your device…',
     waitingForSource: 'Waiting for host to choose a source…',

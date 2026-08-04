@@ -5,7 +5,7 @@
       <span />
       <span />
     </div>
-    <p class="eyebrow">SCREENMIRROR</p>
+    <p class="eyebrow">ScreenMirror</p>
     <h1>{{ text }}</h1>
     <button v-if="props.step !== 1" type="button" @click="$emit('reinitiate')">
       {{ t('viewer.reinitiate') }}

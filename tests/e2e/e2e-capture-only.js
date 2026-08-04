@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * End-to-end capture test: prove that real macOS frames flow through the
- * Screenmirror capture pipeline (xcap → JPEG encode → binary bytes).
+ * ScreenMirror capture pipeline (xcap → JPEG encode → binary bytes).
  *
  * Strategy: bypass the WebRTC DTLS layer (which is unreliable in Node via
  * @roamhq/wrtc on loopback) and verify the captured JPEG bytes are valid.

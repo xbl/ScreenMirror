@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build or validate the generated Screenmirror icon assets.
+ * Build or validate the generated ScreenMirror icon assets.
  */
 import fs from 'node:fs';
 import path from 'node:path';

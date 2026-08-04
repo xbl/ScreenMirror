@@ -1,8 +1,8 @@
-# Screenmirror 测试策略
+# ScreenMirror 测试策略
 
 ## 目标与范围
 
-Screenmirror 是由 Tauri 2 Host、Vue 3 Host SPA、独立 Viewer SPA，以及 Rust WebRTC/信令服务组成的局域网扩展屏应用。测试策略覆盖功能正确性、播放链路、交互回归、性能边界和提交门禁。
+ScreenMirror 是由 Tauri 2 Host、Vue 3 Host SPA、独立 Viewer SPA，以及 Rust WebRTC/信令服务组成的局域网扩展屏应用。测试策略覆盖功能正确性、播放链路、交互回归、性能边界和提交门禁。
 
 测试应优先验证稳定的公开契约：用户可见状态、组件输入输出、命令/服务协议、媒体是否真实解码。不要把 CSS class、DOM 排列、像素坐标或内部实现细节当作主要契约。
 

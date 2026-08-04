@@ -1,4 +1,4 @@
 interface:
-  display_name: "Screenmirror Automated Testing"
+  display_name: "ScreenMirror Automated Testing"
   short_description: "Test Vue, Rust, WebRTC, and Tauri boundaries"
-  default_prompt: "Use $automated-testing to plan, add, diagnose, and verify Screenmirror tests."
+  default_prompt: "Use $automated-testing to plan, add, diagnose, and verify ScreenMirror tests."

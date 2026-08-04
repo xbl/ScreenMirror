@@ -1,4 +1,4 @@
-# Screenmirror Documentation
+# ScreenMirror Documentation
 
 ## Current architecture
 

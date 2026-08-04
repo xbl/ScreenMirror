@@ -1,6 +1,6 @@
 export default {
   viewer: {
-    title: 'Screenmirror 观看端',
+    title: 'ScreenMirror 观看端',
     reinitiate: '重新连接',
     waitingForAllow: '等待主机允许连接...',
     waitingForSource: '等待主机选择分享源...',
@@ -22,7 +22,7 @@ export default {
   },
   privacy: {
     title: '隐私',
-    intro: 'Screenmirror 只在局域网内镜像你的屏幕。我们不需要任何数据来提供这个功能。',
+    intro: 'ScreenMirror 只在局域网内镜像你的屏幕。我们不需要任何数据来提供这个功能。',
     bullet1: '没有分析、遥测或第三方追踪。',
     bullet2: '画面通过 WebRTC 点对点传输，主机不会保存画面。',
     bullet3: '不会向第三方发送数据。',

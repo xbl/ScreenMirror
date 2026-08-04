@@ -2,7 +2,7 @@
 
 ## 目标
 
-在 macOS 13 及以上版本，将 Screenmirror 的 Host 到 Viewer 实际动作延迟
+在 macOS 13 及以上版本，将 ScreenMirror 的 Host 到 Viewer 实际动作延迟
 降低到不超过 500ms，同时保持当前 High 画质档和稳定帧率。
 
 ## 架构

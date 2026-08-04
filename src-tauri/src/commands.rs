@@ -272,7 +272,7 @@ pub fn open_source_picker_window(app: AppHandle) -> Result<(), String> {
         "source-picker",
         tauri::WebviewUrl::App("index.html?source-picker=1".into()),
     )
-    .title("Screenmirror")
+    .title("ScreenMirror")
     .inner_size(720.0, 430.0)
     .min_inner_size(560.0, 400.0)
     .resizable(false)
