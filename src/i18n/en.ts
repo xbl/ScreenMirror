@@ -70,6 +70,7 @@ export default {
     title: 'Settings',
     language: 'Language',
     version: 'Version',
+    projectHomepage: 'Project homepage',
     source: 'Source',
     close: 'Close',
   },

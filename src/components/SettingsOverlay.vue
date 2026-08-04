@@ -29,6 +29,14 @@
           <span class="st-value st-mono">{{ version || '—' }}</span>
         </section>
 
+        <button class="st-section st-project" type="button" @click="openProjectHomepage">
+          <span>
+            <span class="st-label">{{ t('settings.projectHomepage') }}</span>
+            <strong>github.com/xbl/ScreenMirror</strong>
+          </span>
+          <span class="st-project-icon" aria-hidden="true">↗</span>
+        </button>
+
         <footer class="st-foot">
           <button class="btn btn-ghost" type="button" @click="onReset">
             {{ t('app.reset') }}
@@ -88,6 +96,10 @@ async function checkPermission() {
 
 async function openPermissionSettings() {
   await api.openScreenRecordingSettings();
+}
+
+async function openProjectHomepage() {
+  await api.openExternalLink('https://github.com/xbl/ScreenMirror');
 }
 
 watch(() => props.open, (open) => {
@@ -172,6 +184,40 @@ async function onReset() {
 
 .st-section:last-of-type {
   border-bottom: none;
+}
+
+.st-project {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  text-align: left;
+}
+
+.st-project > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.st-project strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-project-icon {
+  color: var(--accent);
+  font-size: var(--fs-16);
+}
+
+.st-project:hover strong {
+  color: var(--accent);
 }
 
 .st-inline-section {

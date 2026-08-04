@@ -29,8 +29,8 @@ fn show_tray_panel(app: &tauri::AppHandle, anchor: Option<tauri::PhysicalPositio
     let url = tauri::WebviewUrl::App("index.html?tray=1".into());
     let result = tauri::WebviewWindowBuilder::new(app, "tray-panel", url)
         .title("Screenmirror")
-        .inner_size(430.0, 620.0)
-        .min_inner_size(380.0, 560.0)
+        .inner_size(430.0, 545.0)
+        .min_inner_size(380.0, 500.0)
         .resizable(false)
         .decorations(false)
         .always_on_top(true)

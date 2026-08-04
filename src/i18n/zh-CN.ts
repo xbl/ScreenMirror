@@ -70,6 +70,7 @@ export default {
     title: '设置',
     language: '语言',
     version: '版本',
+    projectHomepage: '项目主页',
     source: '分享源',
     close: '关闭',
   },
