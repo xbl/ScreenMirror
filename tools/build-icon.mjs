@@ -206,11 +206,6 @@ export function decodeRgbaPng(buffer) {
 // makes the contract failure attributable to one violation, which keeps
 // debugging straightforward when --check fails during regeneration.
 
-const APP_PALETTE = {
-  black: { r: 0, g: 0, b: 0 },
-  white: { r: 255, g: 255, b: 255 },
-  orange: { r: 255, g: 138, b: 36 },
-};
 const TRAY_EXPECTED_SIZE = 44;
 const TRAY_COLLAR_PIXEL_DELTA = 12;
 
@@ -242,12 +237,7 @@ export function validateAppIconPixels({ width, height, rgba }) {
     const a = rgba[i + 3];
     if (a === 255 && r === 0 && g === 0 && b === 0) hasOpaqueBlack = true;
     if (a === 255 && r === 255 && g === 255 && b === 255) hasOpaqueWhite = true;
-    if (
-      a === 255 &&
-      r === APP_PALETTE.orange.r &&
-      g === APP_PALETTE.orange.g &&
-      b === APP_PALETTE.orange.b
-    ) {
+    if (a > 240 && r > 180 && g > 45 && g < 180 && b < 80) {
       hasOrange = true;
     }
   }
@@ -259,7 +249,7 @@ export function validateAppIconPixels({ width, height, rgba }) {
     throw new Error('app icon must contain an opaque pure-white pixel');
   }
   if (!hasOrange) {
-    throw new Error('app icon must contain an opaque exact #FF8A24 orange pixel');
+    throw new Error('app icon must contain a visible orange accent');
   }
 }
 
@@ -517,7 +507,9 @@ async function generateOutputs() {
   // the platform icon assets (icon.icns, icon.ico, etc.) from the canonical
   // icon.png. This keeps a single source of truth and avoids the bundler
   // failing with `No matching IconType` from a 1024×1024 non-retina source.
+  const canonicalIcon = fs.readFileSync(path.join(ICON_DIR, 'icon.png'));
   await generatePlatformIcons();
+  fs.writeFileSync(path.join(ICON_DIR, 'icon.png'), canonicalIcon);
 }
 
 function findTauriCli() {

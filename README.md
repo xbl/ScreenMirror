@@ -1,5 +1,9 @@
 # ScreenMirror
 
+<p align="center">
+  <img src="src-tauri/icons/icon-512.png" width="160" height="160" alt="ScreenMirror App 图标">
+</p>
+
 把身边任何能打开浏览器的设备，变成 Mac 的低延迟第二块屏幕。
 
 ScreenMirror 通过局域网分享 Mac 的主屏幕、扩展显示器或单个 App 窗口。观看设备无需安装应用、无需注册账号，扫描二维码即可开始使用。
