@@ -8,6 +8,15 @@
 
 ScreenMirror 通过局域网分享 Mac 的主屏幕、扩展显示器或单个 App 窗口。观看设备无需安装应用、无需注册账号，扫描二维码即可开始使用。
 
+## 产品截图
+
+<p align="center">
+  <img src="docs/screenshots/tray-current.png" width="48%" alt="ScreenMirror 当前版本菜单栏托盘面板">
+  <img src="docs/screenshots/source-picker-current.png" width="48%" alt="ScreenMirror 当前版本分享内容选择窗口">
+</p>
+
+Mac 端以菜单栏托盘面板为主入口，可查看连接信息并选择分享内容。
+
 ## 适合用来做什么
 
 - 把平板、旧电脑或其他浏览器设备变成临时副屏。
