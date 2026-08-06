@@ -235,7 +235,7 @@ editing PlayerView.vue or the WebRTC handshake, run:
 # 1. Make sure no zombie screenmirror is squatting on the port.
 lsof -nP -iTCP:3131 -sTCP:LISTEN
 # If anything is listed, kill it (it may be from a previous crashed e2e run):
-pkill -9 -f "target/debug/screenmirror"
+pkill -9 -f "aarch64-apple-darwin/debug/screenmirror"
 pkill -9 -f "Google Chrome.*headless"
 
 # 2. Run the direct diagnostic that drives both ends:
@@ -251,8 +251,9 @@ node tools/diag-frames-direct.js
 
 **Common non-code causes** that produce the "no frames" symptom but are NOT
 PlayerView bugs:
-- Zombie `target/debug/screenmirror` holding port 3131 from a prior crashed
-  e2e run → ws gets `NOT_ALLOWED` and closes immediately, no stream ever
+- Zombie `aarch64-apple-darwin/debug/screenmirror` holding port 3131 from a
+  prior crashed e2e run → ws gets `NOT_ALLOWED` and closes immediately, no
+  stream ever
   arrives.
 - Chrome not actually launching under puppeteer (no `--user-data-dir`) → no
   viewer-side console at all; this looks like "nothing happens."

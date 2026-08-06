@@ -106,17 +106,20 @@ impl Drop for ScreenKitCapture {
     }
 }
 
+/// Build a ScreenCaptureKit content filter for the target plus its source dimensions.
 #[cfg(all(target_os = "macos", feature = "screenkit"))]
-pub fn start_screen_capture(
-    target: CaptureTarget,
-    fps: u32,
-) -> Result<ScreenKitCapture, ScreenKitError> {
-    use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt, SCFrameStatus};
+fn build_screen_capture_filter(
+    target: &CaptureTarget,
+) -> Result<
+    (
+        screencapturekit::stream::content_filter::SCContentFilter,
+        u32,
+        u32,
+    ),
+    ScreenKitError,
+> {
     use screencapturekit::shareable_content::SCShareableContent;
-    use screencapturekit::stream::configuration::{PixelFormat, SCStreamConfiguration};
     use screencapturekit::stream::content_filter::SCContentFilter;
-    use screencapturekit::stream::output_type::SCStreamOutputType;
-    use screencapturekit::stream::sc_stream::SCStream;
 
     let content = SCShareableContent::get()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
@@ -167,6 +170,20 @@ pub fn start_screen_capture(
             ))
         }
     };
+    Ok((filter, source_width, source_height))
+}
+
+#[cfg(all(target_os = "macos", feature = "screenkit"))]
+pub fn start_screen_capture(
+    target: CaptureTarget,
+    fps: u32,
+) -> Result<ScreenKitCapture, ScreenKitError> {
+    use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt, SCFrameStatus};
+    use screencapturekit::stream::configuration::{PixelFormat, SCStreamConfiguration};
+    use screencapturekit::stream::output_type::SCStreamOutputType;
+    use screencapturekit::stream::sc_stream::SCStream;
+
+    let (filter, source_width, source_height) = build_screen_capture_filter(&target)?;
     // Ask ScreenCaptureKit to scale before delivering BGRA. Capturing a full
     // Retina surface and resizing/copying it after delivery makes the cost
     // grow with the source pixel count even when the encoder target is 1920px.
