@@ -54,6 +54,21 @@ ScreenMirror 优先保证操作跟手和内容可读。网络或设备处理速�
 
 画质选择位于 Mac 端，因为分享画面的分辨率和流畅度由发送端决定。
 
+## 安装与首次打开
+
+当前发布版本未经过 Apple 公证，macOS 首次启动时会阻止打开。请只从本项目的 GitHub Releases 下载，然后按以下步骤手动确认：
+
+1. 将 `ScreenMirror.app` 拖入“应用程序”文件夹并尝试打开一次。
+2. 打开“系统设置 → 隐私与安全性”。
+3. 滚动到“安全性”，找到“已阻止 ScreenMirror.app 以保护 Mac”的提示。
+4. 点击“仍要打开”，完成身份验证后再次确认打开。
+
+<p align="center">
+  <img src="docs/screenshots/gatekeeper-open-anyway.png" width="760" alt="在 macOS 隐私与安全性设置中允许打开 ScreenMirror">
+</p>
+
+“仍要打开”只会在应用被系统阻止后出现。完成一次确认后，后续可以从“应用程序”或菜单栏正常启动。
+
 ## 使用方法
 
 1. 在 Mac 上启动 ScreenMirror。
