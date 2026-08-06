@@ -58,12 +58,24 @@ jobs:
       - name: Build unsigned macOS bundles
         run: npx tauri build --target aarch64-apple-darwin --features screenkit
 
-      - name: Package app bundle for release
+      - name: Sign app bundle for Gatekeeper compatibility
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          app_path="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/ScreenMirror.app"
+          codesign --force --deep --verbose --sign - --timestamp=none "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          rm -f src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          version="${RELEASE_TAG#v}"
+          hdiutil create \
+            -volname "ScreenMirror ${version}" \
+            -srcfolder "$app_path" \
+            -ov -format UDZO \
+            "src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/ScreenMirror_${version}_aarch64.dmg"
+
           ditto -c -k --sequesterRsrc --keepParent \
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/ScreenMirror.app \
+            "$app_path" \
             "ScreenMirror-${RELEASE_TAG}-aarch64.app.zip"
 
       - name: Upload macOS bundles
