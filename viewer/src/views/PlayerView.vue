@@ -14,7 +14,12 @@
       @error="onVideoError"
     />
 
-    <div v-if="status === 'streaming'" class="player-streaming" role="status">
+    <div
+      v-if="status === 'streaming'"
+      class="player-streaming player-status"
+      :data-state="status"
+      role="status"
+    >
       <span class="player-status-dot" aria-hidden="true" />
       {{ t('player.streaming') }}
     </div>
@@ -48,7 +53,6 @@
         <p class="player-center-title">{{ t('player.connecting') }}</p>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -56,9 +60,11 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useViewerStatus } from '../lib/viewerStatus';
+import { useViewerStream } from '../lib/viewerStream';
 
 const { t } = useI18n();
 const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
+const { activeStream, peerConnection, setActiveStream } = useViewerStream();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 const pendingStream = ref<MediaStream | null>(null);
@@ -101,7 +107,16 @@ function startFrameWatchdog() {
       return;
     }
     if (v.videoWidth === 0 || v.videoHeight === 0) {
-      console.error('[player-view] no frames after ' + (FRAME_WATCHDOG_MS / 1000) + 's; videoWidth=0 videoHeight=0 readyState=' + v.readyState + ' networkState=' + v.networkState + ' error=' + (v.error ? v.error.code : 'none'));
+      console.error(
+        '[player-view] no frames after ' +
+          FRAME_WATCHDOG_MS / 1000 +
+          's; videoWidth=0 videoHeight=0 readyState=' +
+          v.readyState +
+          ' networkState=' +
+          v.networkState +
+          ' error=' +
+          (v.error ? v.error.code : 'none'),
+      );
       noFrames.value = true;
       markDisconnected();
     }
@@ -114,7 +129,12 @@ function onLoadedMetadata() {
     frameWatchdog = undefined;
   }
   noFrames.value = false;
-  console.log('[player-view] loadedmetadata videoWidth=' + (videoEl.value?.videoWidth ?? 0) + ' videoHeight=' + (videoEl.value?.videoHeight ?? 0));
+  console.log(
+    '[player-view] loadedmetadata videoWidth=' +
+      (videoEl.value?.videoWidth ?? 0) +
+      ' videoHeight=' +
+      (videoEl.value?.videoHeight ?? 0),
+  );
 }
 
 function onVideoError(event: Event) {
@@ -124,23 +144,31 @@ function onVideoError(event: Event) {
   markDisconnected();
 }
 
-function onStream(event: Event) {
-  const stream = (event as CustomEvent<MediaStream>).detail;
-  if (!(stream instanceof MediaStream)) return;
-  for (const track of stream.getTracks()) {
-    if (track.readyState === 'ended') {
-      console.error('[player-view] track arrived ended:', track.kind, track.id);
-      noFrames.value = true;
-      markDisconnected();
-      return;
-    }
-    track.addEventListener('ended', () => {
-      console.warn('[player-view] track ended:', track.kind, track.id);
-      if (status.value === 'streaming') {
+function isMediaStream(val: unknown): val is MediaStream {
+  if (typeof MediaStream !== 'undefined') {
+    return val instanceof MediaStream;
+  }
+  return val !== null && typeof val === 'object';
+}
+
+function handleStream(stream: MediaStream) {
+  if (!isMediaStream(stream)) return;
+  if (typeof stream.getTracks === 'function') {
+    for (const track of stream.getTracks()) {
+      if (track.readyState === 'ended') {
+        console.error('[player-view] track arrived ended:', track.kind, track.id);
         noFrames.value = true;
         markDisconnected();
+        return;
       }
-    });
+      track.addEventListener('ended', () => {
+        console.warn('[player-view] track ended:', track.kind, track.id);
+        if (status.value === 'streaming') {
+          noFrames.value = true;
+          markDisconnected();
+        }
+      });
+    }
   }
   (window as unknown as { __smVideoTrack?: boolean }).__smVideoTrack = true;
   // Cache the stream FIRST, then flip status. Do NOT call attachStream here:
@@ -152,6 +180,17 @@ function onStream(event: Event) {
   // single source of truth for attachment.
   pendingStream.value = stream;
   markStreaming();
+}
+
+function onStream(event: Event) {
+  const stream = (event as CustomEvent<MediaStream>).detail;
+  if (isMediaStream(stream)) {
+    if (activeStream.value !== stream) {
+      setActiveStream(stream);
+    } else if (stream !== videoEl.value?.srcObject && stream !== pendingStream.value) {
+      handleStream(stream);
+    }
+  }
 }
 
 function reconnect() {
@@ -197,19 +236,51 @@ watch(
   { immediate: true, flush: 'post' },
 );
 
+// Watch activeStream from the reactive stream layer
+watch(activeStream, (newStream) => {
+  if (newStream && newStream !== videoEl.value?.srcObject && newStream !== pendingStream.value) {
+    handleStream(newStream);
+  }
+});
+
+// Watch peerConnection changes
+watch(
+  peerConnection,
+  (newPc, oldPc) => {
+    if (oldPc) {
+      oldPc.removeEventListener('iceconnectionstatechange', onPcFailure);
+      oldPc.removeEventListener('connectionstatechange', onPcFailure);
+    }
+    if (newPc) {
+      pcRef = newPc;
+      newPc.addEventListener('iceconnectionstatechange', onPcFailure);
+      newPc.addEventListener('connectionstatechange', onPcFailure);
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   status.value = 'connecting';
   window.addEventListener('viewer-stream', onStream);
+
+  // If activeStream was already received before PlayerView mounted, immediately handle it
+  if (activeStream.value) {
+    handleStream(activeStream.value);
+  }
+
   const ws = (window as unknown as { __smDebugWs?: WebSocket }).__smDebugWs;
   if (ws) {
     ws.addEventListener('close', scheduleDisconnected);
     ws.addEventListener('error', scheduleDisconnected);
   }
-  const pc = (window as unknown as { __smPc?: RTCPeerConnection }).__smPc;
-  if (pc) {
-    pcRef = pc;
-    pc.addEventListener('iceconnectionstatechange', onPcFailure);
-    pc.addEventListener('connectionstatechange', onPcFailure);
+  if (!pcRef) {
+    const pc = (window as unknown as { __smPc?: RTCPeerConnection }).__smPc;
+    if (pc) {
+      pcRef = pc;
+      pc.addEventListener('iceconnectionstatechange', onPcFailure);
+      pc.addEventListener('connectionstatechange', onPcFailure);
+    }
   }
   emit('state', 2);
 });
@@ -223,6 +294,11 @@ onBeforeUnmount(() => {
     pcRef.removeEventListener('iceconnectionstatechange', onPcFailure);
     pcRef.removeEventListener('connectionstatechange', onPcFailure);
     pcRef = null;
+  }
+  const ws = (window as unknown as { __smDebugWs?: WebSocket }).__smDebugWs;
+  if (ws) {
+    ws.removeEventListener('close', scheduleDisconnected);
+    ws.removeEventListener('error', scheduleDisconnected);
   }
   void reset;
 });
@@ -326,12 +402,21 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--surface) 78%, transparent);
   backdrop-filter: blur(16px);
   font-size: var(--fs-12);
-  opacity: .86;
+  opacity: 0.86;
   pointer-events: none;
 }
 
-.player-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent); }
+.player-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+}
 
-@media (prefers-reduced-motion: reduce) { .player-streaming { transition: none; } }
-
+@media (prefers-reduced-motion: reduce) {
+  .player-streaming {
+    transition: none;
+  }
+}
 </style>

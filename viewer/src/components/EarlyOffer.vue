@@ -5,9 +5,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { getViewerMetadata } from '../lib/signaling';
+import { useViewerStream } from '../lib/viewerStream';
 
 const props = defineProps<{ ws: WebSocket | null; roomId: string }>();
 const emit = defineEmits<{ (e: 'ready'): void }>();
+
+const { setActiveStream, setPeerConnection } = useViewerStream();
 
 const pc = ref<RTCPeerConnection | null>(null);
 let started = false;
@@ -42,7 +45,8 @@ async function startNegotiation() {
   // Ask the host for a real WebRTC video track. ICE candidates are gathered
   // into the SDP so the existing signaling path remains unchanged.
   pc.value = new RTCPeerConnection({ iceServers: [] });
-  // expose PC so PlayerView can subscribe to connectionstatechange
+  // Expose PC in both the reactive stream store and global window for tests/diagnostics
+  setPeerConnection(pc.value);
   (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
@@ -57,7 +61,8 @@ async function startNegotiation() {
     }
     const stream = event.streams[0] ?? new MediaStream([event.track]);
     console.log('[early-offer] video track received', event.track.kind);
-    window.dispatchEvent(new CustomEvent('viewer-stream', { detail: stream }));
+    // Expose stream in reactive store immediately (also dispatches 'viewer-stream' and sets __smVideoTrack)
+    setActiveStream(stream);
     emit('ready');
   };
 
@@ -101,7 +106,10 @@ async function startNegotiation() {
 
   // createOffer puts PC into have-local-offer so setRemoteDescription(answer)
   // is well-defined.
-  const offer = await pc.value.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
+  const offer = await pc.value.createOffer({
+    offerToReceiveAudio: false,
+    offerToReceiveVideo: true,
+  });
   await pc.value.setLocalDescription(offer);
   await new Promise<void>((resolve) => {
     if (pc.value?.iceGatheringState === 'complete') {
@@ -154,7 +162,12 @@ onMounted(() => {
           pc.value
             .setRemoteDescription({ type: 'answer', sdp: m.payload.sdp })
             .then(() => console.log('[early-offer] ANSWER set ok'))
-            .catch((err) => console.error('[early-offer] ANSWER setRemoteDescription failed:', err?.message ?? err));
+            .catch((err) =>
+              console.error(
+                '[early-offer] ANSWER setRemoteDescription failed:',
+                err?.message ?? err,
+              ),
+            );
         }
       } catch (err) {
         console.error('[early-offer] ANSWER parse err', err);
@@ -173,6 +186,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (disconnectTimer) window.clearTimeout(disconnectTimer);
   pc.value?.close();
+  setPeerConnection(null);
   closeSignalingConnection();
 });
 </script>

@@ -2,6 +2,8 @@ import { ref, type Ref } from 'vue';
 
 export type ViewerStatus = 'idle' | 'connecting' | 'streaming' | 'disconnected';
 
+const sharedStatus = ref<ViewerStatus>('idle');
+
 /**
  * Status state machine for the viewer side.
  *
@@ -9,7 +11,7 @@ export type ViewerStatus = 'idle' | 'connecting' | 'streaming' | 'disconnected';
  *   idle → connecting          (on mount, immediately)
  *   connecting → streaming     (when the WebRTC media track arrives —
  *                               the caller invokes markStreaming() from the
- *                               existing 'viewer-stream' CustomEvent listener)
+ *                               reactive activeStream or 'viewer-stream' event)
  *   streaming → disconnected   (when the host stops pushing or the
  *                               signaling WebSocket closes — caller invokes
  *                               markDisconnected())
@@ -21,19 +23,17 @@ export function useViewerStatus(): {
   markDisconnected: () => void;
   reset: () => void;
 } {
-  const status = ref<ViewerStatus>('idle');
-
   function markStreaming() {
-    if (status.value !== 'streaming') status.value = 'streaming';
+    if (sharedStatus.value !== 'streaming') sharedStatus.value = 'streaming';
   }
   function markDisconnected() {
     // Don't downgrade a streaming viewer back to disconnected for transient
     // blips; the caller should debounce. We accept whatever the caller says.
-    status.value = 'disconnected';
+    sharedStatus.value = 'disconnected';
   }
   function reset() {
-    status.value = 'connecting';
+    sharedStatus.value = 'connecting';
   }
 
-  return { status, markStreaming, markDisconnected, reset };
+  return { status: sharedStatus, markStreaming, markDisconnected, reset };
 }
