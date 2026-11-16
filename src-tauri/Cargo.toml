@@ -7,7 +7,7 @@ authors = ["screenmirror"]
 default-run = "screenmirror"
 
 [features]
-default = []
+default = ["screenkit"]
 screenkit = ["dep:screencapturekit", "dep:videotoolbox", "dep:apple-cf"]
 
 [lib]

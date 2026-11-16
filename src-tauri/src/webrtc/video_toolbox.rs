@@ -170,7 +170,15 @@ impl VideoEncoder {
         self.inner.dimensions()
     }
 
-    pub fn encode(&mut self, rgba: &[u8]) -> Result<H264EncodedFrame, String> {
+    pub fn force_keyframe(&mut self) {
+        self.inner.force_keyframe();
+    }
+
+    pub fn encode(
+        &mut self,
+        rgba: &[u8],
+        captured_at: std::time::Instant,
+    ) -> Result<H264EncodedFrame, String> {
         let (width, height) = self.dimensions();
         let expected = width as usize * height as usize * 4;
         if rgba.len() != expected {
@@ -189,11 +197,10 @@ impl VideoEncoder {
             bytes_per_row: width * 4,
             bgra: Some(bgra),
             iosurface: None,
-            captured_at: std::time::Instant::now(),
+            captured_at,
         };
         self.inner.encode(&frame).map_err(|error| error.to_string())
-    }
-}
+    }}
 
 #[cfg(test)]
 mod tests {

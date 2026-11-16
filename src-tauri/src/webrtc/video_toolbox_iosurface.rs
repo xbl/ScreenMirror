@@ -28,6 +28,46 @@ mod native {
     use videotoolbox::compression::CompressionSession;
     use videotoolbox::session::Codec;
 
+    fn build_session(
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate_kbps: u32,
+    ) -> Result<CompressionSession, IOSurfaceEncoderError> {
+        let session = CompressionSession::builder(width as i32, height as i32, Codec::H264)
+            .with_real_time(true)
+            .with_allow_frame_reordering(false)
+            .with_average_bit_rate((bitrate_kbps.max(1) as i32).saturating_mul(1000))
+            .with_expected_frame_rate(fps.max(1) as f64)
+            .with_max_keyframe_interval((fps.max(1) * 2) as i32)
+            .build()
+            .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
+
+        // Configure zero frame delay for real-time low latency
+        unsafe {
+            let delay_count: i32 = 0;
+            let num = videotoolbox::ffi::CFNumberCreate(
+                videotoolbox::ffi::kCFAllocatorDefault,
+                videotoolbox::ffi::kCFNumberSInt32Type,
+                core::ptr::from_ref(&delay_count).cast(),
+            );
+            if !num.is_null() {
+                let res = session.set_property(
+                    videotoolbox::ffi::kVTCompressionPropertyKey_MaxFrameDelayCount,
+                    num.cast(),
+                );
+                videotoolbox::ffi::CFRelease(num.cast());
+                if let Err(e) = res {
+                    // kVTPropertyNotSupportedErr (-12900) is returned when the hardware
+                    // encoder enforces real-time zero delay via RealTime + AllowFrameReordering=false.
+                    tracing::debug!("kVTCompressionPropertyKey_MaxFrameDelayCount not supported or failed: {e}");
+                }
+            }
+        }
+
+        Ok(session)
+    }
+
     fn coremedia_sample_is_sync(sample: &apple_cf::cm::CMSampleBuffer) -> Option<bool> {
         // kCMSampleAttachmentKey_NotSync is absent for a sync sample. Read
         // the attachment directly because apple-cf intentionally exposes only
@@ -65,9 +105,15 @@ mod native {
         width: u32,
         height: u32,
         fps: u32,
+        bitrate_kbps: u32,
         session: CompressionSession,
         fallback_surface: Option<IOSurface>,
         pts: i64,
+        /// PTS clock origin, shared across session rebuilds so presentation
+        /// timestamps stay monotonic in wall-clock time. Capture is
+        /// change-driven, so a uniform per-frame PTS would distort playback
+        /// rate after any static gap.
+        pts_origin: std::time::Instant,
         sps_pps: Vec<u8>,
     }
 
@@ -81,23 +127,38 @@ mod native {
             if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
                 return Err(IOSurfaceEncoderError::InvalidDimensions(width, height));
             }
-            let session = CompressionSession::builder(width as i32, height as i32, Codec::H264)
-                .with_real_time(true)
-                .with_allow_frame_reordering(false)
-                .with_average_bit_rate((bitrate_kbps.max(1) as i32).saturating_mul(1000))
-                .with_expected_frame_rate(fps.max(1) as f64)
-                .with_max_keyframe_interval((fps.max(1) * 2) as i32)
-                .build()
-                .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
+            let session = build_session(width, height, fps, bitrate_kbps)?;
             Ok(Self {
                 width,
                 height,
                 fps: fps.max(1),
+                bitrate_kbps,
                 session,
                 fallback_surface: None,
                 pts: 0,
+                pts_origin: std::time::Instant::now(),
                 sps_pps: Vec::new(),
             })
+        }
+
+        /// Request that the next encoded frame be an IDR. The sync
+        /// `CompressionSession::encode` API cannot pass per-frame
+        /// properties (`kVTEncodeFrameOptionKey_ForceKeyFrame`), so rebuild
+        /// the session instead — a fresh session always starts with an IDR.
+        /// Forced-IDR events are rare (only after a dropped frame), so the
+        /// rebuild cost is acceptable. On failure the old session is kept;
+        /// the stream then resynchronizes at the next GOP boundary.
+        pub fn force_keyframe(&mut self) {
+            match build_session(self.width, self.height, self.fps, self.bitrate_kbps) {
+                Ok(session) => {
+                    self.session = session;
+                    // The new session has new SPS/PPS; re-extract lazily.
+                    self.sps_pps.clear();
+                }
+                Err(error) => {
+                    tracing::warn!("failed to rebuild session for forced IDR: {error}");
+                }
+            }
         }
 
         pub fn encode(
@@ -114,8 +175,11 @@ mod native {
                     frame.width, frame.height, self.width, self.height
                 )));
             }
+            let pts_ms = frame.captured_at.duration_since(self.pts_origin).as_millis() as i64;
+            self.pts = self.pts.saturating_add(1).max(pts_ms);
+            let presentation_time = (self.pts, 1000);
             let encoded = if let Some(surface) = frame.iosurface.as_ref() {
-                self.session.encode(surface, (self.pts, self.fps as i32))
+                self.session.encode(surface, presentation_time)
             } else {
                 let bgra = frame
                     .bgra
@@ -153,10 +217,9 @@ mod native {
                     dst[dst_start..dst_end].copy_from_slice(&bgra[src_start..src_end]);
                 }
                 drop(guard);
-                self.session.encode(surface, (self.pts, self.fps as i32))
+                self.session.encode(surface, presentation_time)
             }
             .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
-            self.pts = self.pts.saturating_add(1);
             if self.sps_pps.is_empty() {
                 if let Some(sample) = encoded.cm_sample_buffer() {
                     if let Some(format) = sample.format_description() {
@@ -232,10 +295,10 @@ mod native {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn available() -> bool {
-        true
-    }
+    // No `available()` probe here: the videotoolbox crate exposes no cheap
+    // synchronous way to verify VideoToolbox will actually accept frames, so
+    // an unconditional `true` would be misleading. Callers gate on the
+    // compile-time `is_available()` and handle runtime encode errors.
 }
 
 #[derive(Debug)]
@@ -283,6 +346,15 @@ impl IOSurfaceVideoEncoder {
         }
     }
 
+    pub fn force_keyframe(&mut self) {
+        #[cfg(all(target_os = "macos", feature = "screenkit"))]
+        {
+            self.inner.force_keyframe()
+        }
+        #[cfg(not(all(target_os = "macos", feature = "screenkit")))]
+        {}
+    }
+
     pub fn flush(&mut self) -> Result<(), IOSurfaceEncoderError> {
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
         {
@@ -328,5 +400,12 @@ mod tests {
             IOSurfaceVideoEncoder::new(320, 240, 30, 500),
             Err(IOSurfaceEncoderError::Unsupported)
         ));
+    }
+    #[cfg(all(target_os = "macos", feature = "screenkit"))]
+    #[test]
+    fn screenkit_build_reports_available() {
+        assert!(is_available());
+        let encoder = IOSurfaceVideoEncoder::new(320, 240, 30, 500);
+        assert!(encoder.is_ok(), "failed to create encoder: {:?}", encoder.err());
     }
 }

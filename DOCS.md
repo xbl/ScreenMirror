@@ -58,6 +58,15 @@ The application keeps screen frames on the local network and does not collect us
 
 ## Verification
 
+For the default FFmpeg backend, install `ffmpeg@7` using the native Apple Silicon
+Homebrew installation (`brew install ffmpeg@7`). The build discovers its prefix
+with `brew --prefix ffmpeg@7`; it does not use the old Intel `/usr/local` prefix.
+Set `FFMPEG_DIR` to an alternative compatible FFmpeg 7 installation when needed.
+The `screenkit` feature does not require FFmpeg.
+Use an `aarch64-apple-darwin` Rust host toolchain as well (`rustc -vV` reports
+the host). An Intel Rust host targeting arm64 cannot load Apple's native
+libclang during binding generation.
+
 Run checks from the repository root unless a command changes directory:
 
 ```bash

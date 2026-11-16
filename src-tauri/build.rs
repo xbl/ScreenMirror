@@ -1,5 +1,6 @@
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
     if env::var_os("CARGO_FEATURE_SCREENKIT").is_some() {
@@ -8,7 +9,21 @@ fn main() {
         return;
     }
 
-    let ffmpeg_dir = env::var("FFMPEG_DIR").unwrap_or_else(|_| "/usr/local/opt/ffmpeg".to_string());
+    println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
+    let ffmpeg_dir = env::var("FFMPEG_DIR").unwrap_or_else(|_| {
+        let output = Command::new("brew")
+            .args(["--prefix", "ffmpeg@7"])
+            .output()
+            .expect("Install FFmpeg with `brew install ffmpeg@7`, or set FFMPEG_DIR");
+        assert!(
+            output.status.success(),
+            "Could not locate FFmpeg 7; run `brew install ffmpeg@7`, or set FFMPEG_DIR"
+        );
+        String::from_utf8(output.stdout)
+            .expect("Homebrew returned a non-UTF-8 FFmpeg prefix")
+            .trim()
+            .to_owned()
+    });
     let ffmpeg_include = PathBuf::from(&ffmpeg_dir).join("include");
 
     println!(

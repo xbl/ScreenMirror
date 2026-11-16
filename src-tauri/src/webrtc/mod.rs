@@ -741,6 +741,12 @@ pub fn spawn_video_capture_loop(
         let mut iosurface_encoder: Option<IOSurfaceVideoEncoder> = None;
         let mut iosurface_disabled = false;
         let mut encoded_count = 0u32;
+        // Cleared once the first keyframe has reached the sink. Encoder
+        // start-up can legitimately exceed the stale-frame budget, so the
+        // very first keyframe is always delivered; after that, stale
+        // keyframes are dropped like stale P-frames because a forced IDR
+        // follows anyway.
+        let mut delivered_keyframe = false;
         while encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
             let mut frame = {
                 let (lock, wake) = &*encoder_frame_slot;
@@ -842,6 +848,7 @@ pub fn spawn_video_capture_loop(
             } else {
                 None
             };
+            let used_iosurface = native_result.is_some();
             let result = if let Some(result) = native_result {
                 result
             } else {
@@ -884,7 +891,20 @@ pub fn spawn_video_capture_loop(
                         }
                     }
                 }
-                encoder.as_mut().unwrap().encode(rgba.as_raw())
+                encoder
+                    .as_mut()
+                    .unwrap()
+                    .encode(rgba.as_raw(), frame.captured_at)
+            };
+            let force_idr = |iosurface_encoder: &mut Option<IOSurfaceVideoEncoder>,
+                             encoder: &mut Option<VideoEncoder>| {
+                if used_iosurface {
+                    if let Some(native_encoder) = iosurface_encoder.as_mut() {
+                        native_encoder.force_keyframe();
+                    }
+                } else if let Some(software_encoder) = encoder.as_mut() {
+                    software_encoder.force_keyframe();
+                }
             };
             let elapsed = encode_started.elapsed();
             if encoded_count < 3 || elapsed >= Duration::from_millis(100) {
@@ -899,13 +919,26 @@ pub fn spawn_video_capture_loop(
                 Ok(mut encoded) => {
                     encoded_count = encoded_count.wrapping_add(1);
                     encoded.captured_at = frame.captured_at;
-                    // Native VideoToolbox may spend 300-400ms producing a frame on
-                    // high-resolution displays. Keep that bounded-latency frame
-                    // rather than starving the viewer after its first keyframe.
+                    // Dropping a stale frame of any kind breaks the H.264
+                    // reference chain for later P-frames, so every drop is
+                    // followed by a forced IDR; a stale keyframe is dropped
+                    // too instead of preserving a 500 ms+ latency spike.
+                    // Exception: the very first keyframe, which covers the
+                    // encoder's one-off start-up delay.
                     if encoded.captured_at.elapsed() <= Duration::from_millis(500)
-                        || encoded.keyframe
+                        || (encoded.keyframe && !delivered_keyframe)
                     {
+                        if encoded.keyframe {
+                            delivered_keyframe = true;
+                        }
                         encoder_sink(encoded);
+                    } else {
+                        tracing::warn!(
+                            age_ms = encoded.captured_at.elapsed().as_millis() as u64,
+                            keyframe = encoded.keyframe,
+                            "dropping stale encoded frame; forcing IDR on next frame"
+                        );
+                        force_idr(&mut iosurface_encoder, &mut encoder);
                     }
                 }
                 Err(error) if error.starts_with("expected ") => {
@@ -915,7 +948,12 @@ pub fn spawn_video_capture_loop(
                 // startup delay. This is not an encode failure; the next
                 // captured frame will drain the delayed packet.
                 Err(error) if error == "encoder buffering" => {}
-                Err(error) => tracing::warn!("H.264 encode error: {error}"),
+                Err(error) => {
+                    tracing::warn!("H.264 encode error: {error}");
+                    // A failed encode on the IOSurface path also dropped a
+                    // frame the viewer will never see; recover with an IDR.
+                    force_idr(&mut iosurface_encoder, &mut encoder);
+                }
             }
         }
     });

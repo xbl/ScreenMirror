@@ -39,6 +39,11 @@ pub struct NativeVideoEncoder {
     buf_rgba: Vec<u8>,
     buf_yuv: Vec<u8>,
     sps_pps: Vec<u8>,
+    /// PTS clock origin. Frames are stamped with the elapsed time between
+    /// this instant and their real capture time, so playback rate matches
+    /// wall clock even when capture is change-driven (long static gaps,
+    /// dropped frames, or bursty updates).
+    pts_origin: std::time::Instant,
     next_pts: i64,
     /// H.264 packets the encoder has already produced but the caller has
     /// not yet consumed. The encoder has an internal buffering delay
@@ -48,7 +53,6 @@ pub struct NativeVideoEncoder {
     /// one frame per call.
     pending: std::collections::VecDeque<H264EncodedFrame>,
     force_keyframe_next: bool,
-    emitted_keyframe: bool,
 }
 
 fn cstr(s: &str) -> CString {
@@ -118,12 +122,13 @@ impl NativeVideoEncoder {
             (*ctx).bit_rate = (bitrate_kbps as i64) * 1000;
             (*ctx).time_base = av::AVRational {
                 num: 1,
-                // PTS advances by one for each captured frame below, so the
-                // time base must be the actual frame cadence. Using
-                // `fps * 1000` makes frames appear 1000x too fast and causes
-                // VideoToolbox to buffer indefinitely (window sharing then
-                // shows only its first frame).
-                den: fps_c,
+                // PTS is the elapsed milliseconds between encoder creation
+                // and the frame's real capture time (see `pts_origin`), so
+                // the time base is milliseconds. A uniform per-frame PTS
+                // (`den: fps`) distorts playback rate whenever capture is
+                // change-driven: after a static gap the viewer would see a
+                // burst of "fast-forward" frames.
+                den: 1000,
             };
             (*ctx).framerate = av::AVRational { num: fps_c, den: 1 };
             (*ctx).gop_size = fps_c * 2;
@@ -159,6 +164,13 @@ impl NativeVideoEncoder {
                 let vc = cstr(v);
                 let _ = av::av_opt_set(opts_ctx, kc.as_ptr(), vc.as_ptr(), 0);
             }
+            // allow_sw=1 keeps working video on machines where the hardware
+            // encoder is unavailable, at the cost of a possible silent
+            // latency hit. There is no reliable post-open query for which
+            // path VideoToolbox took, so make the trade-off visible.
+            tracing::info!(
+                "h264_videotoolbox opened {width}x{height}@{fps} (allow_sw=true; hardware encoding preferred but not guaranteed)"
+            );
 
             let rc = av::avcodec_open2(ctx, codec, std::ptr::null_mut());
             if rc < 0 {
@@ -221,10 +233,10 @@ impl NativeVideoEncoder {
                 buf_rgba: vec![0u8; rgba_len],
                 buf_yuv: vec![0u8; yuv_len],
                 sps_pps,
+                pts_origin: std::time::Instant::now(),
                 next_pts: 0,
                 pending: std::collections::VecDeque::new(),
                 force_keyframe_next: true,
-                emitted_keyframe: false,
             };
 
             Ok(enc)
@@ -246,31 +258,35 @@ impl NativeVideoEncoder {
         for _ in 0..max_iters {
             let rc = av::avcodec_receive_packet(self.ctx, self.packet);
             if rc == 0 {
-                // Read data/size/flags directly via the bindgen-generated
+                // Read data/size directly via the bindgen-generated
                 // AVPacket. `(*self.packet).size` is c_int (not usize);
                 // cast is safe.
                 let data_ptr = (*self.packet).data;
                 let data_size = (*self.packet).size as usize;
-                let pkt_data = std::slice::from_raw_parts(data_ptr, data_size);
-                // VideoToolbox/libavcodec does not consistently preserve
-                // AV_PKT_FLAG_KEY for every backend. The NAL unit is the
-                // authoritative signal needed by the candidate-capture gate.
+                let raw = std::slice::from_raw_parts(data_ptr, data_size);
+                // Some VideoToolbox versions emit length-prefixed (AVCC)
+                // packets. str0m downstream needs Annex B, and the IDR probe
+                // below can only walk Annex B — normalize before either use.
+                let pkt_data = crate::webrtc::video_toolbox::avcc_to_annex_b(raw)
+                    .unwrap_or_else(|_| raw.to_vec());
+                // The NAL unit type is the authoritative keyframe signal.
+                // libavcodec does not consistently preserve AV_PKT_FLAG_KEY
+                // across backends. Never guess: a packet that is not an
+                // actual IDR must not be marked as one, or late-joining
+                // viewers receive a frame they cannot decode.
                 let is_key = (*self.packet).flags & 1 != 0
-                    || crate::webrtc::video_toolbox::is_keyframe(pkt_data)
-                    // The first output follows an explicit IDR request, but
-                    // some VideoToolbox versions omit AV_PKT_FLAG_KEY and
-                    // use length-prefixed NALs that the Annex-B probe cannot
-                    // inspect. Treat that one packet as the startup IDR.
-                    || !self.emitted_keyframe;
-                if is_key {
-                    self.emitted_keyframe = true;
+                    || crate::webrtc::video_toolbox::is_keyframe(&pkt_data);
+                if is_key && self.sps_pps.is_empty() {
+                    // VideoToolbox often only publishes extradata after the
+                    // first IDR, so a snapshot taken in `new` may be empty.
+                    self.sps_pps = extract_sps_pps(self.ctx);
                 }
 
                 let mut out = Vec::with_capacity(self.sps_pps.len() + pkt_data.len());
                 if is_key {
                     out.extend_from_slice(&self.sps_pps);
                 }
-                out.extend_from_slice(pkt_data);
+                out.extend_from_slice(&pkt_data);
                 self.pending.push_back(H264EncodedFrame {
                     data: out,
                     keyframe: is_key,
@@ -286,7 +302,19 @@ impl NativeVideoEncoder {
         Ok(())
     }
 
-    pub fn encode(&mut self, rgba: &[u8]) -> Result<H264EncodedFrame, String> {
+    /// Request that the next encoded frame be an IDR. Call after any event
+    /// that breaks the P-frame reference chain (a dropped or discarded
+    /// frame), so the viewer resynchronizes immediately instead of waiting
+    /// for the next GOP boundary.
+    pub fn force_keyframe(&mut self) {
+        self.force_keyframe_next = true;
+    }
+
+    pub fn encode(
+        &mut self,
+        rgba: &[u8],
+        captured_at: std::time::Instant,
+    ) -> Result<H264EncodedFrame, String> {
         let expected = (self.width as usize) * (self.height as usize) * 4;
         if rgba.len() != expected {
             return Err(format!(
@@ -358,7 +386,10 @@ impl NativeVideoEncoder {
             (*self.frame_yuv).format = av::AVPixelFormat_AV_PIX_FMT_YUV420P as c_int;
             let request_keyframe = self.force_keyframe_next;
             if request_keyframe {
-                (*self.ctx).gop_size = 1;
+                // `pict_type = I` (below) is the supported way to request an
+                // IDR from this encoder. Do NOT flip `gop_size` at runtime:
+                // mutating an open AVCodecContext is not a documented
+                // thread-safe forced-IDR mechanism.
                 (*self.frame_yuv).key_frame = 1;
                 (*self.frame_yuv).pict_type = av::AVPictureType_AV_PICTURE_TYPE_I;
             } else {
@@ -374,7 +405,12 @@ impl NativeVideoEncoder {
             // the first few inputs while its session starts; later capture
             // iterations drain that delay without duplicating frames.
             const MAX_DRAIN: i32 = 64;
-            self.next_pts += 1;
+            // Stamp the frame with its real capture time (milliseconds since
+            // encoder creation). A uniform `pts += 1` cadence misrepresents
+            // change-driven capture: after a static gap the viewer would see
+            // compressed-time "fast forward" motion.
+            let pts_ms = captured_at.duration_since(self.pts_origin).as_millis() as i64;
+            self.next_pts = self.next_pts.saturating_add(1).max(pts_ms);
             (*self.frame_yuv).pts = self.next_pts;
             let send_rc = av::avcodec_send_frame(self.ctx, self.frame_yuv);
             if send_rc < 0 && !is_eagain(send_rc) {
@@ -385,14 +421,16 @@ impl NativeVideoEncoder {
                 // encoder may return it several calls later, so queue
                 // selection below separately protects that pending IDR.
                 self.force_keyframe_next = false;
-                (*self.ctx).gop_size = self.fps.max(1) as c_int * 2;
             }
             self.drain_packets(MAX_DRAIN)?;
 
             // If VideoToolbox releases several delayed packets at once, keep
             // only the newest one. Sending the backlog would turn encoder
             // startup or a transient stall into seconds of display latency.
-            let frame = if self.pending.iter().any(|frame| frame.keyframe) {
+            // Discarding a P-frame breaks the reference chain for every
+            // later P-frame, so force an IDR next unless we kept a keyframe.
+            let kept_keyframe = self.pending.iter().any(|frame| frame.keyframe);
+            let frame = if kept_keyframe {
                 self.pending
                     .iter()
                     .position(|frame| frame.keyframe)
@@ -400,9 +438,11 @@ impl NativeVideoEncoder {
             } else {
                 self.pending.pop_back()
             };
+            if !kept_keyframe && self.pending.len() > 1 {
+                self.force_keyframe_next = true;
+            }
             self.pending.clear();
             if let Some(frame) = frame {
-                (*self.ctx).gop_size = self.fps.max(1) as c_int * 2;
                 Ok(frame)
             } else {
                 Err("encoder buffering".into())
@@ -505,7 +545,7 @@ mod tests {
         let mut enc = NativeVideoEncoder::new(320, 240, 30, 500).expect("encoder");
         let mut first = None;
         for salt in 0..16u8 {
-            match enc.encode(&varied_rgba(320, 240, salt)) {
+            match enc.encode(&varied_rgba(320, 240, salt), std::time::Instant::now()) {
                 Ok(frame) => {
                     first = Some(frame);
                     break;
@@ -529,7 +569,7 @@ mod tests {
         let rgba2 = varied_rgba(320, 240, 17);
         let start = std::time::Instant::now();
         let frame = loop {
-            match enc.encode(&rgba2) {
+            match enc.encode(&rgba2, std::time::Instant::now()) {
                 Ok(frame) => break frame,
                 Err(error) if error == "encoder buffering" => continue,
                 Err(error) => panic!("encode second: {error}"),
