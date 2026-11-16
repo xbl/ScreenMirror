@@ -42,13 +42,3 @@ fn release_device_frees_slot() {
     assert!(s.release_device("d1"));
     assert!(s.is_slot_available());
 }
-
-#[test]
-fn pending_api_is_compatibility_noop() {
-    let mut s = ConnectedDevicesService::new();
-    assert!(s.get_pending().is_none());
-    s.set_pending(dev("p1"));
-    assert!(s.get_pending().is_none());
-    s.reset_pending();
-    assert!(s.get_pending().is_none());
-}

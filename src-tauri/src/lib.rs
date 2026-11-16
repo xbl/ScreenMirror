@@ -109,7 +109,7 @@ pub mod icons;
 pub mod network;
 pub mod permissions;
 pub mod signaling;
-pub mod storage;
+pub(crate) mod storage;
 pub mod webrtc;
 
 #[derive(Default, Clone)]

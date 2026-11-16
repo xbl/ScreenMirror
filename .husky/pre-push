@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+echo "==> [pre-push] Running full Rust test suite..."
+(cd src-tauri && cargo test)
+
+echo "✅ All pre-push tests passed!"

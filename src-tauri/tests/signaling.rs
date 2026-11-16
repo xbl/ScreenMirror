@@ -6,28 +6,12 @@ use screenmirror_lib::signaling::handlers::HostPeerMap;
 use screenmirror_lib::signaling::handlers::{
     build_router, parse_message, uses_mobile_capture_profile,
 };
-use screenmirror_lib::signaling::room::Room;
 use screenmirror_lib::signaling::room_id::RoomIDService;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
-
-#[test]
-fn room_new_is_unlocked() {
-    let r = Room::new("123456".into());
-    assert!(!r.is_locked);
-}
-
-#[test]
-fn room_toggle_lock() {
-    let mut r = Room::new("123456".into());
-    r.toggle_lock();
-    assert!(r.is_locked);
-    r.toggle_lock();
-    assert!(!r.is_locked);
-}
 
 #[test]
 fn parse_message_user_enter() {

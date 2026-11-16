@@ -161,58 +161,17 @@ pub fn get_waiting_source_id(state: State<'_, CommandState>) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn start_sharing(state: State<'_, CommandState>) -> Result<(), String> {
-    let pending = state.devices.lock().get_pending();
-    if let Some(p) = pending {
-        state
-            .devices
-            .lock()
-            .add_device(p)
-            .map_err(|e| e.to_string())?;
-    }
+pub fn start_sharing(_state: State<'_, CommandState>) -> Result<(), String> {
     Ok(())
 }
 
 #[tauri::command]
-pub fn get_pending_device(state: State<'_, CommandState>) -> Option<Device> {
-    state.devices.lock().get_pending()
+pub fn get_pending_device(_state: State<'_, CommandState>) -> Option<Device> {
+    None
 }
 
 #[tauri::command]
-pub fn set_device_connected_status(state: State<'_, CommandState>) -> Result<(), String> {
-    let pending = state.devices.lock().get_pending();
-    if let Some(p) = pending {
-        let room_id = p.room_id.clone();
-        let connection_id = p.id.clone();
-        state
-            .devices
-            .lock()
-            .add_device(p)
-            .map_err(|e| e.to_string())?;
-        // Notify the waiting viewer that it's been approved so the WS
-        // handshake can advance from PENDING to ALLOWED_TO_CONNECT.
-        let sinks = state.viewer_sinks.lock();
-        if let Some(sink) = sinks.get(&connection_id).or_else(|| sinks.get(&room_id)).cloned() {
-            let _ = sink.send(serde_json::json!({"type": "ALLOWED_TO_CONNECT"}).to_string());
-            tracing::info!(
-                "approved viewer in room {} (connection {})",
-                room_id,
-                connection_id
-            );
-        } else {
-            for (cid, sink) in sinks.iter() {
-                if cid.starts_with(&format!("{}-", room_id)) {
-                    let _ =
-                        sink.send(serde_json::json!({"type": "ALLOWED_TO_CONNECT"}).to_string());
-                    tracing::info!(
-                        "approved viewer connection {} for room {}",
-                        cid,
-                        room_id
-                    );
-                }
-            }
-        }
-    }
+pub fn set_device_connected_status(_state: State<'_, CommandState>) -> Result<(), String> {
     Ok(())
 }
 

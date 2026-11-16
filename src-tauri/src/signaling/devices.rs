@@ -48,18 +48,6 @@ impl ConnectedDevicesService {
     pub fn is_slot_available(&self) -> bool {
         true
     }
-
-    pub fn set_pending(&mut self, device: Device) {
-        self.add_device(device).ok();
-    }
-
-    pub fn reset_pending(&mut self) {
-        // Kept for command/API compatibility; connections are now independent.
-    }
-
-    pub fn get_pending(&self) -> Option<Device> {
-        None
-    }
 }
 
 impl Default for ConnectedDevicesService {

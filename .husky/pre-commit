@@ -1,4 +1,18 @@
 #!/bin/sh
+set -e
 
+echo "==> [1/4] Running Host & Viewer Linter..."
 npm run lint
 (cd viewer && npm run lint)
+
+echo "==> [2/4] Running TypeScript Typecheck..."
+npx vue-tsc --noEmit
+(cd viewer && npx vue-tsc --noEmit -p tsconfig.json)
+
+echo "==> [3/4] Running Unit Tests..."
+npm test
+
+echo "==> [4/4] Running Rust Cargo Check..."
+(cd src-tauri && cargo check)
+
+echo "✅ All pre-commit checks passed!"

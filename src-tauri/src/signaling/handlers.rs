@@ -125,7 +125,6 @@ async fn health() -> impl IntoResponse {
 async fn host_info(State(state): State<AppState>) -> impl IntoResponse {
     let lan_ip = crate::network::get_lan_ip(None).unwrap_or_else(|| "127.0.0.1".to_string());
     let port = *state.port.lock();
-    let pending = state.devices.lock().get_pending();
     let connected: Vec<String> = state
         .devices
         .lock()
@@ -136,7 +135,7 @@ async fn host_info(State(state): State<AppState>) -> impl IntoResponse {
     let body = serde_json::json!({
         "lan_ip": lan_ip,
         "port": port,
-        "pending_device": pending.map(|d| d.id),
+        "pending_device": serde_json::Value::Null,
         "connected_devices": connected,
     });
     (

@@ -35,11 +35,6 @@ impl Storage {
         let _ = self.flush();
     }
 
-    pub fn delete(&mut self, key: &str) {
-        self.data.entries.remove(key);
-        let _ = self.flush();
-    }
-
     fn flush(&self) -> Result<(), String> {
         let raw = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
         std::fs::write(&self.path, raw).map_err(|e| e.to_string())
