@@ -12,6 +12,7 @@ use axum::{
     routing::get,
     Router,
 };
+use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -229,24 +230,48 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state, room_id, remote_addr))
 }
 
+struct ConnectionGuard {
+    state: AppState,
+    connection_id: String,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        cleanup_connection(&self.state, &self.connection_id);
+    }
+}
+
+fn cleanup_connection(state: &AppState, connection_id: &str) {
+    tracing::info!("cleaning up connection: {}", connection_id);
+    state.viewer_sinks.lock().remove(connection_id);
+    state.devices.lock().release_device(connection_id);
+    let _target_switch = state.capture_target_switch_lock.lock();
+    if let Some(peer) = state.host_peers.lock().remove(connection_id) {
+        state.shared_capture.unsubscribe(connection_id);
+        state.mobile_capture.unsubscribe(connection_id);
+        peer.stop();
+    } else {
+        state.shared_capture.unsubscribe(connection_id);
+        state.mobile_capture.unsubscribe(connection_id);
+    }
+}
+
 async fn handle_socket(
-    mut socket: WebSocket,
+    socket: WebSocket,
     state: AppState,
     room_id: String,
     remote_addr: SocketAddr,
 ) {
-    // Throttle: 500ms delay before checking roomId (anti-malicious connections).
     tracing::info!("WS handler entered for room={}", room_id);
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    tracing::info!("WS handler past throttle for room={}", room_id);
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     if !state.room_ids.lock().is_taken(&room_id) {
         tracing::info!("WS rejected: room {} not taken", room_id);
-        let _ = socket
+        let _ = ws_sender
             .send(Message::Text(r#"{"type":"NOT_ALLOWED"}"#.into()))
             .await;
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-        let _ = socket.close().await;
+        let _ = ws_sender.close().await;
         return;
     }
 
@@ -255,199 +280,210 @@ async fn handle_socket(
         room_id,
         NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed)
     );
+    tracing::info!(
+        "WS client accepted for room={}, connection_id={}",
+        room_id,
+        connection_id
+    );
 
-    // Per-connection outbound mpsc — host pushes (ANSWER/ICE) here directly.
+    // Per-connection outbound mpsc — host pushes (ANSWER/ICE/ALLOWED_TO_CONNECT) here directly.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
     state
         .viewer_sinks
         .lock()
         .insert(connection_id.clone(), out_tx.clone());
+
+    let _guard = ConnectionGuard {
+        state: state.clone(),
+        connection_id: connection_id.clone(),
+    };
+
+    // Outbound write task: asynchronously relays messages from out_rx to WebSocket
+    let mut write_task = tokio::spawn(async move {
+        while let Some(msg) = out_rx.recv().await {
+            if let Err(e) = ws_sender.send(Message::Text(msg.into())).await {
+                tracing::debug!("WS write error: {e}");
+                break;
+            }
+        }
+        let _ = ws_sender.close().await;
+    });
+
     let mut viewer_os = "Unknown OS".to_string();
     let mut viewer_browser = "Unknown browser".to_string();
     let mut viewer_max_dimension = 1920_u32;
 
-    while let Some(msg) = socket.recv().await {
-        tracing::info!(
-            "WS recv: {:?}",
-            msg.as_ref().ok().map(|m| format!("{:?}", m))
-        );
-        match msg {
-            Ok(Message::Text(text)) => {
-                let parsed = match parse_message(&text) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                match parsed.type_str() {
-                    "PING" => {
-                        tracing::info!("PING received");
-                        let _ = socket
-                            .send(Message::Text(r#"{"type":"PONG"}"#.into()))
-                            .await;
-                    }
-                    "GET_MY_IP" => {
-                        let _ = socket
-                            .send(Message::Text(
+    let read_loop = async {
+        while let Some(msg) = ws_receiver.next().await {
+            tracing::info!(
+                "WS recv: {:?}",
+                msg.as_ref().ok().map(|m| format!("{:?}", m))
+            );
+            match msg {
+                Ok(Message::Text(text)) => {
+                    let parsed = match parse_message(&text) {
+                        Ok(m) => m,
+                        Err(_) => continue,
+                    };
+                    match parsed.type_str() {
+                        "PING" => {
+                            tracing::info!("PING received");
+                            let _ = out_tx.send(r#"{"type":"PONG"}"#.into());
+                        }
+                        "GET_MY_IP" => {
+                            let _ = out_tx.send(
                                 serde_json::json!({
                                     "type": "MY_IP",
                                     "payload": { "ip": remote_addr.ip().to_string() }
                                 })
-                                .to_string()
-                                .into(),
-                            ))
-                            .await;
-                    }
-                    "USER_ENTER" => {
-                        if let Some(os) = parsed.payload.get("os").and_then(Value::as_str) {
-                            viewer_os = os.to_string();
+                                .to_string(),
+                            );
                         }
-                        if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str)
-                        {
-                            viewer_browser = browser.to_string();
+                        "USER_ENTER" => {
+                            if let Some(os) = parsed.payload.get("os").and_then(Value::as_str) {
+                                viewer_os = os.to_string();
+                            }
+                            if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str)
+                            {
+                                viewer_browser = browser.to_string();
+                            }
+                            viewer_max_dimension = parsed
+                                .payload
+                                .get("maxVideoDimension")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(1920)
+                                .clamp(640, 3840) as u32;
                         }
-                        viewer_max_dimension = parsed
-                            .payload
-                            .get("maxVideoDimension")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(1920)
-                            .clamp(640, 3840) as u32;
-                    }
-                    "OFFER" => {
-                        tracing::info!("OFFER received, room_id={}", room_id);
-                        if let Some(sdp) = parsed.payload.get("sdp").and_then(|v| v.as_str()) {
-                            let (answer_result, peer_opt) = {
-                                let _target_switch = state.capture_target_switch_lock.lock();
-                                let peer_entry = {
-                                    let mut peers = state.host_peers.lock();
-                                    peers
-                                                .entry(connection_id.clone())
-                                                .or_insert_with(|| {
-                                                    let p = Arc::new(HostPeer::new());
-                                                    let bind_ip = std::env::var("SCREENMIRROR_HOST_IP")
-                                                        .ok()
-                                                        .and_then(|s| s.parse::<std::net::IpAddr>().ok())
-                                                        .or_else(|| {
-                                                            crate::network::get_lan_ip(None)
-                                                                .and_then(|s| s.parse::<std::net::IpAddr>().ok())
-                                                        })
-                                                        .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-                                                    tracing::info!("HostPeer::init bind_ip={:?} (env SCREENMIRROR_HOST_IP={:?})", bind_ip, std::env::var("SCREENMIRROR_HOST_IP").ok());
-                                                    if let Err(e) = p.init(bind_ip) {
-                                                        tracing::error!("HostPeer::init: {e}");
-                                                    }
-                                                    p
-                                                })
-                                                .clone()
-                                };
-                                let res = peer_entry.accept_offer(sdp);
-                                if res.is_ok() {
-                                    let target =
-                                        state.capture_target.lock().clone().or_else(|| {
-                                            tracing::warn!(
-                                            "no capture target selected; defaulting to screen 0"
-                                        );
-                                            Some(crate::webrtc::CaptureTarget {
-                                                kind: crate::webrtc::CaptureKind::Screen,
-                                                id: 0,
-                                                source_id: None,
-                                                quality: 0.75,
+                        "OFFER" => {
+                            tracing::info!(
+                                "OFFER received, room_id={}, connection_id={}",
+                                room_id,
+                                connection_id
+                            );
+                            if let Some(sdp) = parsed.payload.get("sdp").and_then(|v| v.as_str()) {
+                                let (answer_result, peer_opt) = {
+                                    let _target_switch = state.capture_target_switch_lock.lock();
+                                    let peer_entry = {
+                                        let mut peers = state.host_peers.lock();
+                                        peers
+                                            .entry(connection_id.clone())
+                                            .or_insert_with(|| {
+                                                let p = Arc::new(HostPeer::new());
+                                                let bind_ip = std::env::var("SCREENMIRROR_HOST_IP")
+                                                    .ok()
+                                                    .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+                                                    .or_else(|| {
+                                                        crate::network::get_lan_ip(None)
+                                                            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+                                                    })
+                                                    .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+                                                tracing::info!("HostPeer::init bind_ip={:?} (env SCREENMIRROR_HOST_IP={:?})", bind_ip, std::env::var("SCREENMIRROR_HOST_IP").ok());
+                                                if let Err(e) = p.init(bind_ip) {
+                                                    tracing::error!("HostPeer::init: {e}");
+                                                }
+                                                p
                                             })
-                                        });
-                                    if let Some(target) = target {
-                                        let mobile = uses_mobile_capture_profile(
-                                            &viewer_os,
-                                            viewer_max_dimension,
-                                        );
-                                        let mut target = target;
-                                        if mobile {
-                                            target.quality = target.quality.min(0.5);
-                                        }
-                                        let fps = crate::webrtc::profile_fps(target.quality);
-                                        if let Err(error) = peer_entry.clone().start_sharing(
-                                            target,
-                                            fps,
+                                            .clone()
+                                    };
+                                    let res = peer_entry.accept_offer(sdp);
+                                    if res.is_ok() {
+                                        let target =
+                                            state.capture_target.lock().clone().or_else(|| {
+                                                tracing::warn!(
+                                                    "no capture target selected; defaulting to screen 0"
+                                                );
+                                                Some(crate::webrtc::CaptureTarget {
+                                                    kind: crate::webrtc::CaptureKind::Screen,
+                                                    id: 0,
+                                                    source_id: None,
+                                                    quality: 0.75,
+                                                })
+                                            });
+                                        if let Some(target) = target {
+                                            let mobile = uses_mobile_capture_profile(
+                                                &viewer_os,
+                                                viewer_max_dimension,
+                                            );
+                                            let mut target = target;
                                             if mobile {
-                                                state.mobile_capture.clone()
-                                            } else {
-                                                state.shared_capture.clone()
-                                            },
-                                            connection_id.clone(),
-                                        ) {
-                                            tracing::error!("start_sharing: {error}");
+                                                target.quality = target.quality.min(0.5);
+                                            }
+                                            let fps = crate::webrtc::profile_fps(target.quality);
+                                            if let Err(error) = peer_entry.clone().start_sharing(
+                                                target,
+                                                fps,
+                                                if mobile {
+                                                    state.mobile_capture.clone()
+                                                } else {
+                                                    state.shared_capture.clone()
+                                                },
+                                                connection_id.clone(),
+                                            ) {
+                                                tracing::error!("start_sharing: {error}");
+                                            }
                                         }
                                     }
-                                }
-                                (res, Some(peer_entry))
-                            };
-                            match answer_result {
-                                Ok(answer) => {
-                                    tracing::info!("sending ANSWER ({} bytes)", answer.len());
-                                    if let Some(sink) =
-                                        state.viewer_sinks.lock().get(&connection_id).cloned()
-                                    {
-                                        let _ = sink.send(
+                                    (res, Some(peer_entry))
+                                };
+                                match answer_result {
+                                    Ok(answer) => {
+                                        tracing::info!("sending ANSWER ({} bytes)", answer.len());
+                                        let _ = out_tx.send(
                                             serde_json::json!({"type": "ANSWER", "payload": {"sdp": answer}})
                                                 .to_string(),
                                         );
-                                    }
-                                    // LAN viewers are auto-approved; each connection is
-                                    // tracked independently so multiple clients can join.
-                                    let viewer_label =
-                                        std::env::var("SCREENMIRROR_E2E_VIEWER_NAME")
-                                            .unwrap_or_else(|_| "Browser Viewer".into());
-                                    let device = crate::signaling::devices::Device {
-                                        id: connection_id.clone(),
-                                        name: viewer_label,
-                                        ip: remote_addr.ip().to_string(),
-                                        os: viewer_os.clone(),
-                                        browser: viewer_browser.clone(),
-                                        room_id: room_id.clone(),
-                                        sharing_session_id: room_id.clone(),
-                                    };
-                                    state.devices.lock().add_device(device).ok();
-                                    if let Some(sink) =
-                                        state.viewer_sinks.lock().get(&connection_id).cloned()
-                                    {
-                                        let _ = sink.send(
+                                        // LAN viewers are auto-approved; each connection is
+                                        // tracked independently so multiple clients can join.
+                                        let viewer_label =
+                                            std::env::var("SCREENMIRROR_E2E_VIEWER_NAME")
+                                                .unwrap_or_else(|_| "Browser Viewer".into());
+                                        let device = crate::signaling::devices::Device {
+                                            id: connection_id.clone(),
+                                            name: viewer_label,
+                                            ip: remote_addr.ip().to_string(),
+                                            os: viewer_os.clone(),
+                                            browser: viewer_browser.clone(),
+                                            room_id: room_id.clone(),
+                                            sharing_session_id: room_id.clone(),
+                                        };
+                                        state.devices.lock().add_device(device).ok();
+                                        let _ = out_tx.send(
                                             serde_json::json!({"type": "ALLOWED_TO_CONNECT"})
                                                 .to_string(),
                                         );
+                                        let _ = peer_opt;
                                     }
-                                    let _ = peer_opt;
-                                }
-                                Err(e) => {
-                                    tracing::warn!("accept_offer failed: {e}");
-                                    let _ = socket
-                                        .send(Message::Text(
+                                    Err(e) => {
+                                        tracing::warn!("accept_offer failed: {e}");
+                                        let _ = out_tx.send(
                                             serde_json::json!({"type": "ERROR", "payload": {"message": e}})
                                                 .to_string(),
-                                        ))
-                                        .await;
+                                        );
+                                    }
                                 }
                             }
                         }
+                        "ICE_CANDIDATE" => {
+                            tracing::debug!("received trickle ICE candidate; candidates are gathered in the SDP offer");
+                        }
+                        _ => {}
                     }
-                    "ICE_CANDIDATE" => {
-                        tracing::debug!("received trickle ICE candidate; candidates are gathered in the SDP offer");
-                    }
-                    _ => {}
                 }
+                Ok(Message::Binary(_)) => {}
+                Ok(Message::Close(_)) | Err(_) => break,
+                _ => {}
             }
-            Ok(Message::Binary(_)) => {}
-            Ok(Message::Close(_)) | Err(_) => break,
-            _ => {}
         }
+    };
 
-        while let Ok(msg) = out_rx.try_recv() {
-            let _ = socket.send(Message::Text(msg)).await;
+    tokio::select! {
+        _ = &mut write_task => {
+            tracing::info!("WS write task terminated for connection_id={}", connection_id);
+        }
+        _ = read_loop => {
+            tracing::info!("WS read loop terminated for connection_id={}", connection_id);
         }
     }
 
-    state.viewer_sinks.lock().remove(&connection_id);
-    state.devices.lock().release_device(&connection_id);
-    let _target_switch = state.capture_target_switch_lock.lock();
-    if let Some(peer) = state.host_peers.lock().remove(&connection_id) {
-        state.shared_capture.unsubscribe(&connection_id);
-        state.mobile_capture.unsubscribe(&connection_id);
-        peer.stop();
-    }
+    write_task.abort();
 }

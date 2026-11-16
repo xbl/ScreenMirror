@@ -99,9 +99,6 @@ async function startNegotiation() {
   send({ type: 'USER_ENTER', payload: { username: 'viewer', ...getViewerMetadata() } });
   console.log('[early-offer] USER_ENTER sent');
 
-  // Wait past server 500ms throttle before sending OFFER.
-  await new Promise((r) => setTimeout(r, 700));
-
   // createOffer puts PC into have-local-offer so setRemoteDescription(answer)
   // is well-defined.
   const offer = await pc.value.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });

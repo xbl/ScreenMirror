@@ -1,7 +1,7 @@
 use crate::network;
 use crate::permissions;
 use crate::signaling::devices::{ConnectedDevicesService, Device};
-use crate::signaling::handlers::HostPeerMap;
+use crate::signaling::handlers::{HostPeerMap, ViewerSinkMap};
 use crate::signaling::room_id::RoomIDService;
 use crate::storage::Storage;
 use parking_lot::Mutex;
@@ -21,8 +21,7 @@ pub struct CommandState {
     pub host_peers: HostPeerMap,
     pub shared_capture: Arc<crate::webrtc::SharedCapture>,
     pub mobile_capture: Arc<crate::webrtc::SharedCapture>,
-    pub viewer_sinks:
-        Arc<Mutex<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
+    pub viewer_sinks: ViewerSinkMap,
 }
 
 #[tauri::command]
@@ -184,6 +183,7 @@ pub fn set_device_connected_status(state: State<'_, CommandState>) -> Result<(),
     let pending = state.devices.lock().get_pending();
     if let Some(p) = pending {
         let room_id = p.room_id.clone();
+        let connection_id = p.id.clone();
         state
             .devices
             .lock()
@@ -191,9 +191,26 @@ pub fn set_device_connected_status(state: State<'_, CommandState>) -> Result<(),
             .map_err(|e| e.to_string())?;
         // Notify the waiting viewer that it's been approved so the WS
         // handshake can advance from PENDING to ALLOWED_TO_CONNECT.
-        if let Some(sink) = state.viewer_sinks.lock().get(&room_id).cloned() {
+        let sinks = state.viewer_sinks.lock();
+        if let Some(sink) = sinks.get(&connection_id).or_else(|| sinks.get(&room_id)).cloned() {
             let _ = sink.send(serde_json::json!({"type": "ALLOWED_TO_CONNECT"}).to_string());
-            tracing::info!("approved viewer in room {}", room_id);
+            tracing::info!(
+                "approved viewer in room {} (connection {})",
+                room_id,
+                connection_id
+            );
+        } else {
+            for (cid, sink) in sinks.iter() {
+                if cid.starts_with(&format!("{}-", room_id)) {
+                    let _ =
+                        sink.send(serde_json::json!({"type": "ALLOWED_TO_CONNECT"}).to_string());
+                    tracing::info!(
+                        "approved viewer connection {} for room {}",
+                        cid,
+                        room_id
+                    );
+                }
+            }
         }
     }
     Ok(())
