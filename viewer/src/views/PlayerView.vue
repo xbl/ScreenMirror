@@ -7,11 +7,11 @@
       autoplay
       playsinline
       muted
-      controls
-      controlslist="nodownload noremoteplayback"
       disablepictureinpicture
       @loadedmetadata="onLoadedMetadata"
       @error="onVideoError"
+      @pause="onVideoPause"
+      @dblclick="toggleFullscreen"
     />
 
     <canvas
@@ -256,6 +256,56 @@ function onVideoError(event: Event) {
   markDisconnected();
 }
 
+function onVideoPause() {
+  const v = videoEl.value;
+  if (v && status.value === 'streaming' && !v.ended) {
+    void v.play().catch(() => {});
+  }
+}
+
+function toggleFullscreen() {
+  if (typeof document === 'undefined') return;
+  if (!document.fullscreenElement) {
+    void document.documentElement.requestFullscreen?.().catch(() => {});
+  } else {
+    void document.exitFullscreen?.().catch(() => {});
+  }
+}
+
+// Screen Wake Lock API: keeps mobile/desktop screen awake during active streaming
+let wakeLockSentinel: WakeLockSentinel | null = null;
+
+async function requestWakeLock() {
+  if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+    try {
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => {
+        wakeLockSentinel = null;
+      });
+      console.log('[player-view] screen wake lock acquired');
+    } catch {
+      // Wake lock can fail if low battery or tab hidden; ignore safely
+    }
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    try {
+      await wakeLockSentinel.release();
+    } catch {
+      // ignore
+    }
+    wakeLockSentinel = null;
+  }
+}
+
+function onVisibilityChange() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible' && status.value === 'streaming') {
+    void requestWakeLock();
+  }
+}
+
 function isMediaStream(val: unknown): val is MediaStream {
   if (typeof MediaStream !== 'undefined') {
     return val instanceof MediaStream;
@@ -362,6 +412,9 @@ watch(
   (isStreaming) => {
     if (!isStreaming) {
       stopWebCodecs();
+      void releaseWakeLock();
+    } else {
+      void requestWakeLock();
     }
   },
 );
@@ -386,6 +439,9 @@ watch(
 onMounted(() => {
   status.value = 'connecting';
   window.addEventListener('viewer-stream', onStream);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
   startLiveEdgeChaser();
 
   // If activeStream was already received before PlayerView mounted, immediately handle it
@@ -412,6 +468,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopLiveEdgeChaser();
   stopWebCodecs();
+  void releaseWakeLock();
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+  }
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;
   if (disconnectedTimer !== undefined) window.clearTimeout(disconnectedTimer);

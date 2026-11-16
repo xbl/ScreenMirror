@@ -212,7 +212,9 @@ pub fn start_screen_capture(
         .with_pixel_format(PixelFormat::BGRA);
     config.set_shows_cursor(true);
 
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<ScreenKitFrame>(1);
+    // Keep a shallow 2-frame channel to decouple real-time CoreMedia delivery
+    // from the encoder loop without blocking either side.
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<ScreenKitFrame>(2);
     let receiver_for_handler = Arc::new(Mutex::new(receiver));
     let receiver_for_handler_callback = receiver_for_handler.clone();
     let stopped = Arc::new(AtomicBool::new(false));
@@ -282,10 +284,10 @@ pub fn start_screen_capture(
             // monotonic and is the timestamp consumed by the existing encoder age gate.
             captured_at: Instant::now(),
         };
-        // Keep only the newest sample. If the bounded channel is full, remove
-        // the queued stale frame before retrying the send.
+        // Keep only the newest sample. Use non-blocking try_lock so the CoreMedia
+        // real-time capture queue never blocks on a worker thread mutex.
         let sent = if let Err(std::sync::mpsc::TrySendError::Full(frame)) = sender.try_send(frame) {
-            if let Ok(queued) = receiver_for_handler_callback.lock() {
+            if let Ok(queued) = receiver_for_handler_callback.try_lock() {
                 let _ = queued.try_recv();
             }
             sender.try_send(frame).is_ok()

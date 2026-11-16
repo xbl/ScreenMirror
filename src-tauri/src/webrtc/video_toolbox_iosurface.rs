@@ -37,13 +37,14 @@ mod native {
         let session = CompressionSession::builder(width as i32, height as i32, Codec::H264)
             .with_real_time(true)
             .with_allow_frame_reordering(false)
+            .with_profile_level(videotoolbox::compression::ProfileLevel::H264HighAutoLevel)
             .with_average_bit_rate((bitrate_kbps.max(1) as i32).saturating_mul(1000))
             .with_expected_frame_rate(fps.max(1) as f64)
             .with_max_keyframe_interval(fps.max(1) as i32)
             .build()
             .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
 
-        // Configure zero frame delay for real-time low latency
+        // Configure zero frame delay, CABAC entropy coding, and burst rate limits
         unsafe {
             let delay_count: i32 = 0;
             let num = videotoolbox::ffi::CFNumberCreate(
@@ -62,6 +63,49 @@ mod native {
                     // encoder enforces real-time zero delay via RealTime + AllowFrameReordering=false.
                     tracing::debug!("kVTCompressionPropertyKey_MaxFrameDelayCount not supported or failed: {e}");
                 }
+            }
+
+            // CABAC entropy mode produces cleaner text and saves 10-15% bitrate
+            let _ = session.set_property(
+                videotoolbox::ffi::kVTCompressionPropertyKey_H264EntropyMode,
+                videotoolbox::ffi::kVTH264EntropyMode_CABAC.cast(),
+            );
+
+            // Cap instantaneous burst to 1.5x average bitrate over a 1-second window
+            // to prevent UDP packet bursts from overflowing Wi-Fi buffers
+            let bytes_per_sec = (((bitrate_kbps.max(1) as i64 * 1000) / 8 * 3 / 2) as i32).max(100_000);
+            let sec: f64 = 1.0;
+            let num_bytes = videotoolbox::ffi::CFNumberCreate(
+                videotoolbox::ffi::kCFAllocatorDefault,
+                videotoolbox::ffi::kCFNumberSInt32Type,
+                core::ptr::from_ref(&bytes_per_sec).cast(),
+            );
+            let num_sec = videotoolbox::ffi::CFNumberCreate(
+                videotoolbox::ffi::kCFAllocatorDefault,
+                videotoolbox::ffi::kCFNumberFloat64Type,
+                core::ptr::from_ref(&sec).cast(),
+            );
+            if !num_bytes.is_null() && !num_sec.is_null() {
+                let mut values: [*const core::ffi::c_void; 2] = [num_bytes.cast(), num_sec.cast()];
+                let array = apple_cf::raw::CFArrayCreate(
+                    videotoolbox::ffi::kCFAllocatorDefault.cast(),
+                    values.as_mut_ptr(),
+                    2,
+                    &apple_cf::raw::kCFTypeArrayCallBacks,
+                );
+                if !array.is_null() {
+                    let _ = session.set_property(
+                        videotoolbox::ffi::kVTCompressionPropertyKey_DataRateLimits,
+                        array.cast(),
+                    );
+                    videotoolbox::ffi::CFRelease(array.cast());
+                }
+            }
+            if !num_bytes.is_null() {
+                videotoolbox::ffi::CFRelease(num_bytes.cast());
+            }
+            if !num_sec.is_null() {
+                videotoolbox::ffi::CFRelease(num_sec.cast());
             }
         }
 
