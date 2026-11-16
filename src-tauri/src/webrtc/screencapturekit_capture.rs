@@ -217,6 +217,8 @@ pub fn start_screen_capture(
     let receiver_for_handler_callback = receiver_for_handler.clone();
     let stopped = Arc::new(AtomicBool::new(false));
     let stopped_for_handler = stopped.clone();
+    let has_delivered_frame = Arc::new(AtomicBool::new(false));
+    let has_delivered_frame_handler = has_delivered_frame.clone();
     let handler = move |sample: screencapturekit::cm::CMSampleBuffer,
                         output_type: SCStreamOutputType| {
         if output_type != SCStreamOutputType::Screen || stopped_for_handler.load(Ordering::Acquire)
@@ -224,7 +226,12 @@ pub fn start_screen_capture(
             return;
         }
         if let Some(status) = sample.frame_status() {
-            if !status.has_content() || matches!(status, SCFrameStatus::Idle) {
+            if matches!(status, SCFrameStatus::Suspended | SCFrameStatus::Blank | SCFrameStatus::Stopped) {
+                return;
+            }
+            // Allow the initial frame through even if status is Idle, so the encoder
+            // can seed and start emitting frames on a static screen.
+            if matches!(status, SCFrameStatus::Idle) && has_delivered_frame_handler.load(Ordering::Acquire) {
                 return;
             }
         }
@@ -277,11 +284,16 @@ pub fn start_screen_capture(
         };
         // Keep only the newest sample. If the bounded channel is full, remove
         // the queued stale frame before retrying the send.
-        if let Err(std::sync::mpsc::TrySendError::Full(frame)) = sender.try_send(frame) {
+        let sent = if let Err(std::sync::mpsc::TrySendError::Full(frame)) = sender.try_send(frame) {
             if let Ok(queued) = receiver_for_handler_callback.lock() {
                 let _ = queued.try_recv();
             }
-            let _ = sender.try_send(frame);
+            sender.try_send(frame).is_ok()
+        } else {
+            true
+        };
+        if sent {
+            has_delivered_frame_handler.store(true, Ordering::Release);
         }
     };
     let mut stream = SCStream::new(&filter, &config);

@@ -98,11 +98,9 @@ screenmirror/
   typecheck only flags consumers that still reference a removed key when
   the i18n helper is statically typed (it isn't here). Always grep consumers
   before deleting a key.
-- `provide`/`inject` uses a `unique symbol` exported from a sibling
-  `*.ts` file (see `src/components/PermissionModalHost.ts` for the pattern).
-  The injection key file exports the symbol **and** the `Ref<... | null>`
-  type so consumers can pass either `ref(null)` or `{ value: null }` as the
-  fallback.
+- `provide`/`inject` uses a `unique symbol` (e.g. `export const MyKey: InjectionKey<...> = Symbol('MyKey')`)
+  exported from a sibling `*.ts` or types file to guarantee type safety across
+  components.
 
 ### SourcePicker state and previews
 

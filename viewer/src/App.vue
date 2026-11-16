@@ -12,7 +12,7 @@ import MainView from './views/MainView.vue';
 import EarlyOffer from './components/EarlyOffer.vue';
 import { connectSignaling, type WireMessage } from './lib/signaling';
 
-const roomId = (window.location.pathname.replace(/^\//, '').split('/')[0] || '');
+const roomId = ref(window.location.pathname.replace(/^\//, '').split('/')[0] || '');
 const ws = ref<WebSocket | null>(null);
 const connectSignal = ref(0); // increment to trigger MainView to mount PlayerView
 
@@ -21,9 +21,11 @@ function onEarlyOffer() {
   connectSignal.value++;
 }
 
-if (roomId) {
+function initSignaling(id: string) {
+  if (!id || ws.value) return;
+  roomId.value = id;
   const socket = connectSignaling(
-    roomId,
+    id,
     (msg: WireMessage) => {
       console.log('[app-vue] ws msg:', msg.type, msg.payload ? JSON.stringify(msg.payload).slice(0, 80) : '');
       window.dispatchEvent(new CustomEvent('viewer-signal', { detail: msg }));
@@ -37,6 +39,23 @@ if (roomId) {
   });
   (window as unknown as { __smDebugWs: WebSocket }).__smDebugWs = socket;
   ws.value = socket;
+}
+
+if (roomId.value) {
+  initSignaling(roomId.value);
+} else {
+  // If user opened root URL without room ID in path, fetch active room from host-info
+  void fetch('/api/host-info')
+    .then((r) => r.json())
+    .then((data: { room_id?: string | null }) => {
+      if (data.room_id) {
+        window.history.replaceState(null, '', `/${data.room_id}`);
+        initSignaling(data.room_id);
+      }
+    })
+    .catch(() => {
+      /* ignore */
+    });
 }
 
 provide('ws', ws);

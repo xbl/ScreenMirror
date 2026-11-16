@@ -119,6 +119,13 @@ async function startWebCodecs(stream: MediaStream) {
       console.warn('[player-view] WebCodecs runtime error, falling back to <video>:', err);
       isUsingWebCodecs.value = false;
     };
+    renderer.onFrame = () => {
+      if (frameWatchdog !== undefined) {
+        window.clearTimeout(frameWatchdog);
+        frameWatchdog = undefined;
+      }
+      noFrames.value = false;
+    };
     await renderer.start(track, canvas);
     isUsingWebCodecs.value = true;
     console.log('[player-view] WebCodecs hardware direct rendering active');
@@ -187,12 +194,42 @@ function onLoadedMetadata() {
     frameWatchdog = undefined;
   }
   noFrames.value = false;
+  startLiveEdgeChaser();
   console.log(
     '[player-view] loadedmetadata videoWidth=' +
       (videoEl.value?.videoWidth ?? 0) +
       ' videoHeight=' +
       (videoEl.value?.videoHeight ?? 0),
   );
+}
+
+let liveEdgeInterval: number | undefined;
+
+function startLiveEdgeChaser() {
+  stopLiveEdgeChaser();
+  liveEdgeInterval = window.setInterval(() => {
+    const v = videoEl.value;
+    if (!v || isUsingWebCodecs.value || v.paused || v.ended) return;
+    try {
+      if (v.buffered.length > 0) {
+        const liveEdge = v.buffered.end(v.buffered.length - 1);
+        const lag = liveEdge - v.currentTime;
+        if (lag > 0.25) {
+          // If native video buffer accumulates > 250ms of lag, snap directly to live edge
+          v.currentTime = Math.max(0, liveEdge - 0.02);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, 250);
+}
+
+function stopLiveEdgeChaser() {
+  if (liveEdgeInterval !== undefined) {
+    window.clearInterval(liveEdgeInterval);
+    liveEdgeInterval = undefined;
+  }
 }
 
 function onVideoError(event: Event) {
@@ -332,6 +369,7 @@ watch(
 onMounted(() => {
   status.value = 'connecting';
   window.addEventListener('viewer-stream', onStream);
+  startLiveEdgeChaser();
 
   // If activeStream was already received before PlayerView mounted, immediately handle it
   if (activeStream.value) {
@@ -355,6 +393,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopLiveEdgeChaser();
   stopWebCodecs();
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;

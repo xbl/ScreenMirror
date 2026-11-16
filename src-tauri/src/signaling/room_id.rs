@@ -35,6 +35,10 @@ impl RoomIDService {
     pub fn is_taken(&self, id: &str) -> bool {
         self.taken.contains(id)
     }
+
+    pub fn first_taken(&self) -> Option<String> {
+        self.taken.iter().next().cloned()
+    }
 }
 
 impl Default for RoomIDService {

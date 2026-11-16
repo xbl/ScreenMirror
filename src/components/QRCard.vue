@@ -137,7 +137,7 @@ async function fetchHostInfo(): Promise<HostInfo | null> {
   // 2) Fallback: try fetching the host-info endpoint directly from the axum
   //    server. The Tauri WebView origin is tauri://localhost which won't
   //    resolve via relative fetch, so probe well-known loopback ports.
-  const probePorts = [3131, 3132, 3133, 3134];
+  const probePorts = [3131, 3132, 3133, 3134, 3135, 3136, 3137, 3138, 3139, 3140];
   for (const p of probePorts) {
     try {
       const r = await fetch(`http://127.0.0.1:${p}/api/host-info`, { cache: 'no-store' });

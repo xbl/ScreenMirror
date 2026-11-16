@@ -132,9 +132,11 @@ async fn host_info(State(state): State<AppState>) -> impl IntoResponse {
         .into_iter()
         .map(|d| d.id)
         .collect();
+    let room_id = state.room_ids.lock().first_taken();
     let body = serde_json::json!({
         "lan_ip": lan_ip,
         "port": port,
+        "room_id": room_id,
         "pending_device": serde_json::Value::Null,
         "connected_devices": connected,
     });
@@ -372,8 +374,12 @@ async fn handle_socket(
                                                     .ok()
                                                     .and_then(|s| s.parse::<std::net::IpAddr>().ok())
                                                     .or_else(|| {
-                                                        crate::network::get_lan_ip(None)
-                                                            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+                                                        if remote_addr.ip().is_loopback() {
+                                                            Some(remote_addr.ip())
+                                                        } else {
+                                                            crate::network::get_lan_ip(None)
+                                                                .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+                                                        }
                                                     })
                                                     .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
                                                 tracing::info!("HostPeer::init bind_ip={:?} (env SCREENMIRROR_HOST_IP={:?})", bind_ip, std::env::var("SCREENMIRROR_HOST_IP").ok());

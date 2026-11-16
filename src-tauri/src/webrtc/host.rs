@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_rtp_timestamp, dequeue_queued_frame, plan_target_switch, queue_admission,
+        advance_rtp_timestamp, calculate_rtp_timestamp, dequeue_queued_frame, plan_target_switch, queue_admission,
         require_expected_generation, should_drop_encoded_frame, HostPeer, QueueAdmission,
         QueuedEncodedFrame, SharedCapture, TargetSwitchPlan,
     };
@@ -86,6 +86,27 @@ mod tests {
         assert_eq!(after_30_fps, 12_000);
         assert_eq!(after_15_fps, 18_000);
         assert!(after_15_fps > after_30_fps);
+    }
+
+    #[test]
+    fn calculate_rtp_timestamp_tracks_wallclock_and_preserves_monotonicity() {
+        let start = Instant::now();
+        let ts0 = calculate_rtp_timestamp(start, start, -1);
+        assert_eq!(ts0, 0);
+
+        let t1 = start + Duration::from_millis(33);
+        let ts1 = calculate_rtp_timestamp(start, t1, ts0);
+        assert_eq!(ts1, 2970);
+
+        // After a 1 second static gap
+        let t2 = start + Duration::from_millis(1033);
+        let ts2 = calculate_rtp_timestamp(start, t2, ts1);
+        assert_eq!(ts2, 92970);
+        assert!(ts2 > ts1 + 3000, "RTP timestamp must track real wall-clock elapsed time across static gaps");
+
+        // Monotonicity check even if clock does not advance
+        let ts3 = calculate_rtp_timestamp(start, t2, ts2);
+        assert_eq!(ts3, ts2 + 1);
     }
 
     #[test]
@@ -373,8 +394,20 @@ fn queue_admission(existing_is_keyframe: bool, incoming_is_keyframe: bool) -> Qu
     }
 }
 
+#[allow(dead_code)]
 fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
     timestamp.wrapping_add(90_000 / i64::from(fps.max(1)))
+}
+
+pub fn calculate_rtp_timestamp(
+    start: Instant,
+    captured_at: Instant,
+    last_timestamp: i64,
+) -> i64 {
+    let elapsed = captured_at.saturating_duration_since(start);
+    // 90 kHz RTP clock: 90 ticks per millisecond = 90_000 ticks per second
+    let pts = (elapsed.as_micros() as u64 * 90 / 1_000) as i64;
+    (last_timestamp + 1).max(pts)
 }
 
 fn require_expected_generation(current: u64, expected: u64) -> Result<(), String> {
@@ -915,11 +948,8 @@ async fn drain_rtc(
                     *subscribed = true;
                 }
             }
-            Ok(Output::Event(Event::IceConnectionStateChange(
-                str0m::IceConnectionState::Disconnected,
-            ))) => {
-                tracing::info!("host: IceConnectionStateChange Disconnected");
-                return DrainOutcome::Closed;
+            Ok(Output::Event(Event::IceConnectionStateChange(state))) => {
+                tracing::info!("host: IceConnectionStateChange {state:?}");
             }
             Ok(Output::Event(_)) => {}
             Err(RtcError::Ice(_)) => {
@@ -940,8 +970,8 @@ fn write_video_frame(
     capture_switch_lock: &Arc<Mutex<()>>,
     capture_generation: &Arc<AtomicU64>,
     rtc_arc: &Arc<Mutex<Option<Rtc>>>,
-    rtp_timestamp_step: &Arc<AtomicI64>,
-    timestamp: &mut i64,
+    stream_start: &mut Option<Instant>,
+    last_timestamp: &mut i64,
 ) -> bool {
     let _switch = capture_switch_lock.lock();
     if capture_generation.load(Ordering::SeqCst) != queued.generation {
@@ -974,17 +1004,18 @@ fn write_video_frame(
                     return false;
                 }
             };
+            let start = stream_start.get_or_insert(frame.captured_at);
+            let rtp_ts = calculate_rtp_timestamp(*start, frame.captured_at, *last_timestamp);
+            *last_timestamp = rtp_ts;
             if let Err(error) = writer.write(
                 pt,
                 now,
-                MediaTime::new(*timestamp, 90_000),
+                MediaTime::new(rtp_ts, 90_000),
                 frame.data,
             ) {
                 tracing::warn!("host: H.264 writer failed: {error}");
                 return false;
             }
-            let current_fps = (90_000 / rtp_timestamp_step.load(Ordering::SeqCst).max(1)) as u32;
-            *timestamp = advance_rtp_timestamp(*timestamp, current_fps);
             // Drive packetization and pacing for the sample we just queued.
             // str0m holds onto the sample in `to_payload` until we feed it Input::Timeout.
             if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
@@ -1005,14 +1036,15 @@ async fn run_rtc_event_loop(
     video_mid_slot: Arc<Mutex<Option<Mid>>>,
     capture_switch_lock: Arc<Mutex<()>>,
     capture_generation: Arc<AtomicU64>,
-    rtp_timestamp_step: Arc<AtomicI64>,
+    _rtp_timestamp_step: Arc<AtomicI64>,
     shared_capture: Arc<SharedCapture>,
     peer_for_subscription: Arc<HostPeer>,
     connection_id: String,
 ) {
     let mut buf = vec![0u8; 2000];
     let mut video_mid: Option<Mid> = None;
-    let mut timestamp: i64 = 0;
+    let mut stream_start: Option<Instant> = None;
+    let mut last_timestamp: i64 = -1;
     let mut subscribed = false;
 
     let local_addr = match socket.local_addr() {
@@ -1058,8 +1090,8 @@ async fn run_rtc_event_loop(
                     &capture_switch_lock,
                     &capture_generation,
                     &rtc_arc,
-                    &rtp_timestamp_step,
-                    &mut timestamp,
+                    &mut stream_start,
+                    &mut last_timestamp,
                 ) {
                     match drain_rtc(
                         &rtc_arc,
@@ -1102,8 +1134,8 @@ async fn run_rtc_event_loop(
                             &capture_switch_lock,
                             &capture_generation,
                             &rtc_arc,
-                            &rtp_timestamp_step,
-                            &mut timestamp,
+                            &mut stream_start,
+                            &mut last_timestamp,
                         ) {
                             match drain_rtc(
                                 &rtc_arc,
@@ -1164,8 +1196,7 @@ async fn run_rtc_event_loop(
                         }
                     }
                     Err(error) => {
-                        tracing::error!("host: socket recv error: {error}");
-                        break 'outer;
+                        tracing::warn!("host: transient socket recv error: {error}");
                     }
                 }
             }

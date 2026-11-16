@@ -1066,7 +1066,24 @@ pub fn spawn_video_capture_loop(
                     // ScreenCaptureKit is change-driven. A timeout means no
                     // new content, not that the stream has failed; retaining
                     // it avoids falling back to slow full-screen xcap polls.
-                    Err(ScreenKitError::Unavailable(_)) => continue,
+                    Err(ScreenKitError::Unavailable(_)) => {
+                        if frames == 0 {
+                            #[cfg(target_os = "macos")]
+                            {
+                                capture_one_at_with_monitor(
+                                    &target,
+                                    frame_index,
+                                    cached_monitor.as_ref(),
+                                )
+                            }
+                            #[cfg(not(target_os = "macos"))]
+                            {
+                                capture_one_at(&target, frame_index)
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
                     Err(ScreenKitError::Stopped) => {
                         tracing::warn!("ScreenCaptureKit stopped; falling back to xcap");
                         screenkit_capture = None;

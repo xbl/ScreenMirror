@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, inject, isRef, type Ref, onMounted, onBeforeUnmount } from 'vue';
 import ConnectionPrompts from './ConnectionPrompts.vue';
 import PlayerView from './PlayerView.vue';
 import { useViewerStream } from '../lib/viewerStream';
@@ -27,7 +27,18 @@ function reload() {
   window.location.reload();
 }
 
-roomId.value = window.location.pathname.replace(/^\//, '').split('/')[0] || '';
+const injectedRoomId = inject<Ref<string>>('roomId');
+if (injectedRoomId && isRef(injectedRoomId)) {
+  watch(
+    injectedRoomId,
+    (val: string) => {
+      if (val) roomId.value = val;
+    },
+    { immediate: true },
+  );
+} else {
+  roomId.value = window.location.pathname.replace(/^\//, '').split('/')[0] || '';
+}
 
 function onViewerSignal(ev: Event) {
   const msg = (ev as CustomEvent).detail as { type: string };

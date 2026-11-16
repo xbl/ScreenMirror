@@ -174,9 +174,9 @@ pub fn run() {
         tracing::info!("smoke room registered: {rid}");
     }
     // Auto-pick the first screen as the capture target so frames flow
-    // when SCREENMIRROR_CAPTURE=screen|window is set.
-    if let Ok(kind) = std::env::var("SCREENMIRROR_CAPTURE") {
-        let target = crate::webrtc::CaptureTarget {
+    // when SCREENMIRROR_CAPTURE=screen|window is set, or default to the primary screen.
+    let initial_target = if let Ok(kind) = std::env::var("SCREENMIRROR_CAPTURE") {
+        crate::webrtc::CaptureTarget {
             kind: match kind.as_str() {
                 "window" => crate::webrtc::CaptureKind::Window,
                 "test" | "testpattern" => crate::webrtc::CaptureKind::TestPattern,
@@ -188,10 +188,32 @@ pub fn run() {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.75),
-        };
-        tracing::info!("capture target set: {:?}", target);
-        *capture_target.lock() = Some(target);
-    }
+        }
+    } else {
+        #[cfg(target_os = "macos")]
+        let primary_target = crate::webrtc::enumerate_sources()
+            .ok()
+            .and_then(|sources| {
+                sources.into_iter().find(|s| s.kind == "screen" && s.is_primary)
+            })
+            .map(|primary| crate::webrtc::CaptureTarget {
+                kind: crate::webrtc::CaptureKind::Screen,
+                id: 0,
+                source_id: Some(primary.source_id),
+                quality: 0.75,
+            });
+        #[cfg(not(target_os = "macos"))]
+        let primary_target: Option<crate::webrtc::CaptureTarget> = None;
+
+        primary_target.unwrap_or_else(|| crate::webrtc::CaptureTarget {
+            kind: crate::webrtc::CaptureKind::Screen,
+            id: 0,
+            source_id: None,
+            quality: 0.75,
+        })
+    };
+    tracing::info!("capture target initialized: {:?}", initial_target);
+    *capture_target.lock() = Some(initial_target);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -307,14 +329,28 @@ pub fn run() {
             let start_port = *pp.lock();
             tauri::async_runtime::spawn(async move {
                 let router = build_router(rr, dd, vp, ct, pp.clone(), vs, hp, sc, mc, ctsl);
-                let addr = std::net::SocketAddr::from(([0, 0, 0, 0], start_port));
-                let listener = match tokio::net::TcpListener::bind(addr).await {
-                    Ok(l) => l,
-                    Err(_) => {
-                        let backup = std::net::SocketAddr::from(([0, 0, 0, 0], start_port + 1));
-                        tokio::net::TcpListener::bind(backup)
-                            .await
-                            .expect("bind backup port")
+                let mut listener = None;
+                for p in start_port..start_port + 10 {
+                    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], p));
+                    match tokio::net::TcpListener::bind(addr).await {
+                        Ok(l) => {
+                            listener = Some(l);
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to bind port {p}: {e}");
+                        }
+                    }
+                }
+                let listener = match listener {
+                    Some(l) => l,
+                    None => {
+                        tracing::error!(
+                            "failed to bind any port in range {}..{}",
+                            start_port,
+                            start_port + 10
+                        );
+                        return;
                     }
                 };
                 let bound = listener.local_addr().unwrap();
