@@ -142,6 +142,14 @@ screenmirror/
   `tauri::generate_handler!` macro (alphabetical order).
 - Cross-platform code uses `#[cfg(target_os = "macos")]` and a paired
   `#[cfg(not(target_os = "macos"))]` stub returning `true` / `Ok(())`.
+- Module visibility: In library crates (`src/lib.rs`), declare internal
+  modules with `pub(crate) mod` rather than `pub mod`. `pub mod` marks all
+  inner items as public API exported to outside consumers, which silences
+  `rustc`'s `dead_code` warnings and lets unused models rot undetected.
+- Concurrency & synchronization: Never use `tokio::time::sleep` or frontend
+  `setTimeout` to mask async races or "wait" for signaling/WebRTC state.
+  Always synchronize via deterministic channels, `tokio::sync::Notify`, or
+  explicit protocol ACK messages.
 
 ### PlayerView.vue — fragile, read before editing
 
@@ -168,10 +176,17 @@ Rules learned the hard way:
 
 ## Verification gates (run before claiming a task done)
 
+Consult `checks.md` for the official multi-layer checklist. Git hooks enforce
+the standard gates automatically:
+- `.husky/pre-commit`: ESLint, `vue-tsc` (Host & Viewer), Vitest, and `cargo check`.
+- `.husky/pre-push`: Full Rust test suite (`cargo test`).
+
+Manual gates before committing:
+
 ```bash
 # Rust
-cd src-tauri && cargo check --release                # expect 3 pre-existing unused-import warnings
-cd src-tauri && cargo test --test permissions        # 3/3 must pass on non-macOS
+cd src-tauri && cargo check --release
+cd src-tauri && cargo test
 
 # Viewer (its own tsconfig + package.json)
 cd viewer && npx vue-tsc --noEmit -p tsconfig.json   # exit 0
@@ -224,6 +239,35 @@ The pre-existing warnings, in case a reviewer flags them as new:
 - `screenmirror/` is a git repo. `git add` / `git commit` work normally here.
 - The `tools/output/` directory is the E2E screenshot dump and is gitignored;
   do not hand-edit or commit it.
+- **Explicit staging only**: Never run `git add .` or `git add -A`. The working
+  directory often contains pre-existing edits or diagnostics. Always stage
+  specific modified paths.
+- Pre-commit hooks (`.husky/pre-commit`) verify lint, types, vitest, and cargo
+  check on every commit. Never bypass with `--no-verify`.
+
+## Subagent and CLI Best Practices
+
+- **Never grep `src-tauri` without excluding `target/`**: Running `grep -r` on
+  `src-tauri/` traverses hundreds of megabytes of build artifacts in
+  `src-tauri/target/`, causing commands to hang for minutes or time out. Always
+  scope searches to `src-tauri/src/` or pass `--exclude-dir=target` (or use `rg`,
+  which respects `.gitignore`).
+- **Inspect `git status` at subagent startup**: When spawning a subagent in an
+  existing workspace, inspect `git status` first to recognize pre-existing
+  uncommitted files versus files modified by the task. Touch only files
+  explicitly assigned in the task brief.
+- **Port 3131 zombie hygiene**: E2E runs (`verify-fix.js` / `diag-frames-direct.js`)
+  spawn Tauri binaries and headless Chrome. If an E2E run is interrupted or
+  fails, port 3131 may stay bound. Always check `lsof -nP -iTCP:3131 -sTCP:LISTEN`
+  and terminate lingering processes (`pkill -9 -f screenmirror`) before testing.
+- **Viewer bundle synchronization**: `viewer/dist/` is the single source of
+  truth served by the host Tauri binary. Any changes inside `viewer/` MUST be
+  followed by `(cd viewer && npm run build)` before running headless E2E.
+- **Dead code detection in Rust and Vue**:
+  - In Rust: Use `pub(crate)` for internal modules in `src/lib.rs` so `rustc`
+    flags dead code. Use `cargo-machete` to find unused dependencies.
+  - In Frontend: Run `npx knip` inside `viewer/` or root to identify unused
+    components, dead exports, and orphaned dependencies.
 
 ## Diagnosing "viewer no frames after 5s" — start here
 
@@ -289,3 +333,10 @@ in that order. Spec → plan → brief form a contract chain.
   wraps exactly one `crate::permissions` / `crate::network` / etc. function.
 - Editing `viewer/src/views/PlayerView.vue`'s `onStream` order without
   re-running `tools/verify-fix.js`.
+- Adding `tokio::time::sleep` or `setTimeout` to mask async races or "wait" for
+  signaling/media state — use channels or `Notify` instead.
+- Running un-scoped `grep -r` or `find` on `src-tauri/` without `--exclude-dir=target`.
+- Declaring internal crate modules as `pub mod` in `src/lib.rs` (use `pub(crate) mod`
+  to let `rustc` catch dead code).
+- Staging changes with `git add .` or `git add -A` (stage explicitly by path).
+- Committing `viewer/` changes without rebuilding `viewer/dist/`.
