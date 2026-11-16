@@ -106,6 +106,12 @@ node tools/verify-fix.js
 5. **Git 提交干净度**：
    - 严禁提交 `tools/output/` 目录下的调试日志与截图文件（已配置在 `.gitignore`）。
    - Commit 标题与描述严格遵循规范：`fix(模块): 简短说明` 或 `feat(模块): 简短说明`。
+6. **禁止将纯内存 Synthetic / Mock 模式作为真实投屏故障修复的唯一验收依据**：
+   - `SCREENMIRROR_CAPTURE=test` 与 `127.0.0.1` 仅能用于信令通道冒烟测试。涉及无画面、黑屏、卡顿或连接超时的故障，必须在真实屏幕抓取（ScreenCaptureKit）和真实局域网 IP 上验证。
+7. **WebRTC 事件循环中严禁在单次 UDP 错误时退出**：
+   - `socket.recv_from` 遇到 `os error 49 (Can't assign requested address)` 等由虚拟网卡/ICMP 产生的不可达暂态错误时，必须只记录警告并继续循环，严禁 break 终止连接。
+8. **当用户反馈真实环境失败时，坚持现场复现原则**：
+   - 严禁仅跑自动化脚本自证清白，必须优先提取真实客户端的 WebRTC 状态（`pc.connectionState`）与 Candidate 协议类型，排查是否受浏览器隐私扩展策略（如 `WebRTC Leak Prevent` 禁用非代理 UDP）限制。
 
 ---
 

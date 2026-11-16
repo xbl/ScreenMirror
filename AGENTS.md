@@ -148,6 +148,14 @@ screenmirror/
   `setTimeout` to mask async races or "wait" for signaling/WebRTC state.
   Always synchronize via deterministic channels, `tokio::sync::Notify`, or
   explicit protocol ACK messages.
+- WebRTC Socket Error Tolerance: In `host.rs`'s WebRTC event loop, socket
+  errors from `socket.recv_from` (such as `os error 49 Can't assign requested address`,
+  `ECONNREFUSED`, `EHOSTUNREACH`) caused by auxiliary or virtual interfaces (e.g.
+  `utun*`, `bridge100`) must be logged as warnings and continued, NEVER breaking
+  the loop.
+- LAN Interface Priority: Virtual interfaces (`utun*`, `bridge*`, `tun*`, `tap*`,
+  `vbox*`) must be filtered out when binding/publishing signaling endpoints and
+  SDP candidates. Always bind to physical private LAN IPv4 interfaces (`en0`, `en1`).
 
 ### PlayerView.vue — fragile, read before editing
 
@@ -215,6 +223,16 @@ timer rather than treating a successful WebRTC handshake as proof of quality.
 Always rebuild `viewer/dist/` before trusting headless output. If Vite/Rollup
 fails because an optional native dependency is missing, treat any existing
 `viewer/dist/` as stale and do not claim the new viewer code was verified.
+
+Synthetic test caution: `SCREENMIRROR_CAPTURE=test` and `127.0.0.1` verify
+signaling and basic pipeline plumbing, but bypass real macOS display capture
+(ScreenCaptureKit), GPU encoding, multi-interface routing, and real-world
+browser network policies. NEVER claim a user-reported streaming/connectivity
+bug is fixed based solely on a synthetic headless test. When a user reports
+that a fix does not work on their machine, do NOT assume code correctness from
+headless tests: inspect the live environment first (e.g. `pc.connectionState`,
+candidate protocol types, browser extensions like `WebRTC Leak Prevent`
+disabling UDP via `disable_non_proxied_udp`).
 
 For source-picker changes, also run a real macOS/Tauri UI check. The minimum
 scenario is: open the tray, verify the primary display preview, choose an App
@@ -293,6 +311,16 @@ node tools/diag-frames-direct.js
 
 **Common non-code causes** that produce the "no frames" symptom but are NOT
 PlayerView bugs:
+- Browser privacy extensions disabling local UDP: If `pc.connectionState`
+  remains stuck in `'new'` or `'checking'`, check candidate types. If candidates
+  contain ONLY TCP and ZERO UDP candidates, check if a browser extension (such
+  as *WebRTC Leak Prevent*) has set `rtcIPHandling: 'disable_non_proxied_udp'`
+  or similar. ScreenMirror requires direct local UDP sockets; blocking non-proxied
+  UDP breaks LAN WebRTC entirely.
+- ScreenCaptureKit static screen cold-start: If ScreenCaptureKit reports
+  `SCFrameStatus::Idle` continuously on static screens, the initial idle frame
+  must be allowed through or synchronous fallback capture triggered, otherwise
+  the viewer watchdog will fire before any frame is transmitted.
 - Zombie `aarch64-apple-darwin/debug/screenmirror` holding port 3131 from a
   prior crashed e2e run → ws gets `NOT_ALLOWED` and closes immediately, no
   stream ever
@@ -333,6 +361,8 @@ in that order. Spec → plan → brief form a contract chain.
   re-running `tools/verify-fix.js`.
 - Adding `tokio::time::sleep` or `setTimeout` to mask async races or "wait" for
   signaling/media state — use channels or `Notify` instead.
+- Breaking the WebRTC event loop on transient UDP `socket.recv_from` errors (e.g. OS error 49).
+- Claiming a user-reported streaming issue is resolved based purely on synthetic `SCREENMIRROR_CAPTURE=test` test runs.
 - Running un-scoped `grep -r` or `find` on `src-tauri/` without `--exclude-dir=target`.
 - Declaring internal crate modules as `pub mod` in `src/lib.rs` (use `pub(crate) mod`
   to let `rustc` catch dead code).
