@@ -308,8 +308,20 @@ impl SharedCapture {
                 .filter_map(Weak::upgrade)
                 .collect::<Vec<_>>()
         };
+        let mut any_dropped = false;
         for peer in peers {
-            peer.enqueue_shared_frame(frame.clone());
+            if !peer.enqueue_shared_frame(frame.clone()) {
+                any_dropped = true;
+            }
+        }
+        if any_dropped {
+            self.request_keyframe();
+        }
+    }
+
+    pub fn request_keyframe(&self) {
+        if let Some(handle) = self.handle.lock().as_ref() {
+            handle.request_keyframe();
         }
     }
 
@@ -566,9 +578,9 @@ pub struct HostPeer {
 
 impl HostPeer {
     pub fn new() -> Self {
-        // A display stream is live state. Keep only one pending access unit so
-        // a slow encoder or viewer can never turn old frames into seconds of lag.
-        let (tx, rx) = std::sync::mpsc::sync_channel::<QueuedEncodedFrame>(1);
+        // Keep a shallow queue (up to 3 frames) to absorb normal pipeline and
+        // transmission jitter without allowing lag accumulation.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<QueuedEncodedFrame>(3);
         Self {
             rtc: Arc::new(Mutex::new(None)),
             socket: Arc::new(Mutex::new(None)),
@@ -813,10 +825,10 @@ impl HostPeer {
         enqueued
     }
 
-    fn enqueue_shared_frame(&self, frame: H264EncodedFrame) {
+    fn enqueue_shared_frame(&self, frame: H264EncodedFrame) -> bool {
         let _queue = self.frame_queue_lock.lock();
         let generation = self.capture_generation.load(Ordering::SeqCst);
-        let _ = self.enqueue_frame_locked(QueuedEncodedFrame { generation, frame });
+        self.enqueue_frame_locked(QueuedEncodedFrame { generation, frame })
     }
 
     fn clear_queued_frames(&self) {
@@ -950,6 +962,14 @@ async fn drain_rtc(
             }
             Ok(Output::Event(Event::IceConnectionStateChange(state))) => {
                 tracing::info!("host: IceConnectionStateChange {state:?}");
+            }
+            Ok(Output::Event(Event::KeyframeRequest(req))) => {
+                tracing::info!(
+                    "host: received KeyframeRequest ({:?}) for mid={:?}",
+                    req.kind,
+                    req.mid
+                );
+                shared_capture.request_keyframe();
             }
             Ok(Output::Event(_)) => {}
             Err(RtcError::Ice(_)) => {

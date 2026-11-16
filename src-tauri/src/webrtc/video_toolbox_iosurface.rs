@@ -39,7 +39,7 @@ mod native {
             .with_allow_frame_reordering(false)
             .with_average_bit_rate((bitrate_kbps.max(1) as i32).saturating_mul(1000))
             .with_expected_frame_rate(fps.max(1) as f64)
-            .with_max_keyframe_interval((fps.max(1) * 2) as i32)
+            .with_max_keyframe_interval(fps.max(1) as i32)
             .build()
             .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
 

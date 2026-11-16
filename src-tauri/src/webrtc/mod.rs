@@ -730,6 +730,8 @@ pub fn spawn_video_capture_loop(
     let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
+    let force_keyframe = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let encoder_force_keyframe = force_keyframe.clone();
     // Keep exactly one pending capture. A slow encoder must consume the newest
     // frame available, never a queue of already-stale frames.
     let frame_slot = Arc::new((Mutex::new(None::<CapturedFrame>), Condvar::new()));
@@ -825,6 +827,10 @@ pub fn spawn_video_capture_loop(
                         }
                     }
                     if let Some(native_encoder) = iosurface_encoder.as_mut() {
+                        if encoder_force_keyframe.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                            tracing::info!("forcing native IOSurface keyframe on request");
+                            native_encoder.force_keyframe();
+                        }
                         match native_encoder.encode(&native_frame) {
                             Ok(encoded) => Some(Ok(encoded)),
                             Err(error) => {
@@ -889,6 +895,12 @@ pub fn spawn_video_capture_loop(
                             tracing::warn!("video encoder initialization failed: {error}");
                             continue;
                         }
+                    }
+                }
+                if encoder_force_keyframe.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                    if let Some(software_encoder) = encoder.as_mut() {
+                        tracing::info!("forcing software encoder keyframe on request");
+                        software_encoder.force_keyframe();
                     }
                 }
                 encoder
@@ -1175,11 +1187,15 @@ pub fn spawn_video_capture_loop(
             }
         }
     });
-    CaptureHandle { running }
+    CaptureHandle {
+        running,
+        force_keyframe,
+    }
 }
 
 pub struct CaptureHandle {
     running: Arc<std::sync::atomic::AtomicBool>,
+    force_keyframe: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg(test)]
@@ -1404,5 +1420,10 @@ impl CaptureHandle {
     pub fn stop(&self) {
         self.running
             .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn request_keyframe(&self) {
+        self.force_keyframe
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 }

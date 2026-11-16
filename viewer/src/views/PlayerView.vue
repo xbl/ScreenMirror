@@ -214,9 +214,18 @@ function startLiveEdgeChaser() {
       if (v.buffered.length > 0) {
         const liveEdge = v.buffered.end(v.buffered.length - 1);
         const lag = liveEdge - v.currentTime;
-        if (lag > 0.25) {
-          // If native video buffer accumulates > 250ms of lag, snap directly to live edge
-          v.currentTime = Math.max(0, liveEdge - 0.02);
+        // Never perform abrupt seeking during normal playback.
+        // Seeking on a live WebRTC stream resets the video decoder,
+        // causing visible flickering, black flashes, and frame teleports.
+        if (lag > 2.0) {
+          // If lag is massive (> 2s, e.g. tab was inactive in background),
+          // snap once directly to live edge.
+          v.currentTime = Math.max(0, liveEdge - 0.05);
+        } else if (lag > 0.35) {
+          // Gently accelerate to catch up smoothly without seeking or decoding restarts
+          if (v.playbackRate !== 1.05) v.playbackRate = 1.05;
+        } else if (lag < 0.15 && v.playbackRate !== 1.0) {
+          v.playbackRate = 1.0;
         }
       }
     } catch {
@@ -229,6 +238,14 @@ function stopLiveEdgeChaser() {
   if (liveEdgeInterval !== undefined) {
     window.clearInterval(liveEdgeInterval);
     liveEdgeInterval = undefined;
+  }
+  const v = videoEl.value;
+  if (v && v.playbackRate !== 1.0) {
+    try {
+      v.playbackRate = 1.0;
+    } catch {
+      // ignore
+    }
   }
 }
 
