@@ -14,6 +14,14 @@
       @error="onVideoError"
     />
 
+    <canvas
+      v-if="status === 'streaming'"
+      ref="canvasEl"
+      v-show="isUsingWebCodecs"
+      class="webcodecs-canvas"
+      aria-hidden="true"
+    />
+
     <div
       v-if="status === 'streaming'"
       class="player-streaming player-status"
@@ -61,14 +69,22 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useViewerStatus } from '../lib/viewerStatus';
 import { useViewerStream } from '../lib/viewerStream';
+import { isWebCodecsSupported, WebCodecsRenderer } from '../lib/webcodecsRenderer';
 
 const { t } = useI18n();
 const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
 const { activeStream, peerConnection, setActiveStream } = useViewerStream();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
+const canvasEl = ref<HTMLCanvasElement | null>(null);
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
+const isUsingWebCodecs = ref(false);
+const renderer = new WebCodecsRenderer();
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __smWebCodecsRenderer?: WebCodecsRenderer }).__smWebCodecsRenderer = renderer;
+}
 
 // VideoToolbox can take several seconds to initialize on a real screen capture
 // before the first keyframe arrives. Keep the element mounted during that cold
@@ -79,21 +95,63 @@ const emit = defineEmits<{
   (e: 'state', step: number): void;
 }>();
 
+async function startWebCodecs(stream: MediaStream) {
+  if (!isWebCodecsSupported()) {
+    isUsingWebCodecs.value = false;
+    return;
+  }
+  const canvas = canvasEl.value;
+  if (!canvas) {
+    isUsingWebCodecs.value = false;
+    return;
+  }
+  const tracks = stream.getVideoTracks();
+  if (tracks.length === 0) {
+    isUsingWebCodecs.value = false;
+    return;
+  }
+  const track = tracks[0];
+  if (renderer.isRunning) {
+    return;
+  }
+  try {
+    renderer.onError = (err) => {
+      console.warn('[player-view] WebCodecs runtime error, falling back to <video>:', err);
+      isUsingWebCodecs.value = false;
+    };
+    await renderer.start(track, canvas);
+    isUsingWebCodecs.value = true;
+    console.log('[player-view] WebCodecs hardware direct rendering active');
+  } catch (err) {
+    console.warn('[player-view] WebCodecs start failed, falling back to <video>:', err);
+    isUsingWebCodecs.value = false;
+  }
+}
+
+function stopWebCodecs() {
+  if (renderer.isRunning) {
+    void renderer.stop();
+  }
+  isUsingWebCodecs.value = false;
+}
+
 function attachStream(stream: MediaStream) {
   const v = videoEl.value;
   if (!v) {
     pendingStream.value = stream;
     return;
   }
-  if (v.srcObject === stream) return;
-  v.srcObject = stream;
-  const playPromise = v.play();
-  if (playPromise && typeof playPromise.then === 'function') {
-    playPromise.catch((err) => {
-      console.error('[player-view] play() rejected:', err);
-    });
+  if (v.srcObject !== stream) {
+    v.srcObject = stream;
+    const playPromise = v.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise.catch((err) => {
+        console.error('[player-view] play() rejected:', err);
+      });
+    }
+    startFrameWatchdog();
   }
-  startFrameWatchdog();
+  void startWebCodecs(stream);
 }
 
 function startFrameWatchdog() {
@@ -239,9 +297,20 @@ watch(
 // Watch activeStream from the reactive stream layer
 watch(activeStream, (newStream) => {
   if (newStream && newStream !== videoEl.value?.srcObject && newStream !== pendingStream.value) {
+    stopWebCodecs();
     handleStream(newStream);
   }
 });
+
+// Watch status leaving streaming to stop WebCodecs rendering
+watch(
+  () => status.value === 'streaming',
+  (isStreaming) => {
+    if (!isStreaming) {
+      stopWebCodecs();
+    }
+  },
+);
 
 // Watch peerConnection changes
 watch(
@@ -286,6 +355,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopWebCodecs();
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;
   if (disconnectedTimer !== undefined) window.clearTimeout(disconnectedTimer);
@@ -322,6 +392,15 @@ onBeforeUnmount(() => {
   object-fit: contain;
   background: var(--canvas);
   cursor: pointer;
+}
+
+.webcodecs-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .player-center {
