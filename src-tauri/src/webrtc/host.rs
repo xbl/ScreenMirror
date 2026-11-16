@@ -199,6 +199,32 @@ mod tests {
             .expect("stop proceeds after the commit boundary");
         stop_thread.join().expect("stop thread exits");
     }
+
+    #[tokio::test]
+    async fn frame_notification_wakes_waiter_on_enqueue() {
+        let peer = Arc::new(HostPeer::new());
+        let notify = peer.frame_notify.clone();
+        let frame = H264EncodedFrame {
+            data: vec![0, 0, 1, 0x65],
+            keyframe: true,
+            captured_at: Instant::now(),
+        };
+        peer.enqueue_shared_frame(frame);
+        tokio::time::timeout(Duration::from_millis(100), notify.notified())
+            .await
+            .expect("frame notification was signaled");
+    }
+
+    #[tokio::test]
+    async fn stop_signals_notification_and_sets_stopped_flag() {
+        let peer = Arc::new(HostPeer::new());
+        let notify = peer.frame_notify.clone();
+        peer.stop();
+        assert!(peer.stopped.load(std::sync::atomic::Ordering::SeqCst));
+        tokio::time::timeout(Duration::from_millis(100), notify.notified())
+            .await
+            .expect("stop woke up notification waiters");
+    }
 }
 
 use parking_lot::Mutex;
@@ -501,6 +527,8 @@ pub struct HostPeer {
     /// H.264 frame queue from capture thread to the RTC event loop.
     frame_tx: std::sync::mpsc::SyncSender<QueuedEncodedFrame>,
     frame_rx: Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+    pub frame_notify: Arc<tokio::sync::Notify>,
+    pub stopped: Arc<AtomicBool>,
 }
 
 impl HostPeer {
@@ -524,6 +552,8 @@ impl HostPeer {
             video_mid: Arc::new(Mutex::new(None)),
             frame_tx: tx,
             frame_rx: Arc::new(Mutex::new(rx)),
+            frame_notify: Arc::new(tokio::sync::Notify::new()),
+            stopped: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -578,6 +608,8 @@ impl HostPeer {
 
     pub fn stop(&self) {
         let _switch = self.capture_switch_lock.lock();
+        self.stopped.store(true, Ordering::SeqCst);
+        self.frame_notify.notify_one();
         self.capture_generation.fetch_add(1, Ordering::SeqCst);
         if let Some(handle) = self.capture_handle.lock().take() {
             handle.stop();
@@ -697,6 +729,7 @@ impl HostPeer {
     ) -> Result<CandidateCapture, String> {
         let frame_tx = self.frame_tx.clone();
         let frame_rx = self.frame_rx.clone();
+        let frame_notify = self.frame_notify.clone();
         let frame_queue_lock = self.frame_queue_lock.clone();
         let capture_generation = self.capture_generation.clone();
         let first_keyframe = Arc::new(Mutex::new(None));
@@ -708,11 +741,13 @@ impl HostPeer {
             if active_for_sink.load(Ordering::SeqCst) {
                 if capture_generation.load(Ordering::SeqCst) == generation {
                     let _queue = frame_queue_lock.lock();
-                    let _ = enqueue_queued_frame(
+                    if enqueue_queued_frame(
                         &frame_tx,
                         &frame_rx,
                         QueuedEncodedFrame { generation, frame },
-                    );
+                    ) {
+                        frame_notify.notify_one();
+                    }
                 }
                 return;
             }
@@ -738,7 +773,11 @@ impl HostPeer {
     }
 
     fn enqueue_frame_locked(&self, queued: QueuedEncodedFrame) -> bool {
-        enqueue_queued_frame(&self.frame_tx, &self.frame_rx, queued)
+        let enqueued = enqueue_queued_frame(&self.frame_tx, &self.frame_rx, queued);
+        if enqueued {
+            self.frame_notify.notify_one();
+        }
+        enqueued
     }
 
     fn enqueue_shared_frame(&self, frame: H264EncodedFrame) {
@@ -768,214 +807,397 @@ impl HostPeer {
             .lock()
             .take()
             .ok_or_else(|| "socket missing".to_string())?;
+        socket.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let socket = tokio::net::UdpSocket::from_std(socket).map_err(|e| e.to_string())?;
+
+        self.stopped.store(false, Ordering::SeqCst);
         *self.active_target.lock() = Some(target.clone());
         self.rtp_timestamp_step
             .store(90_000 / i64::from(fps.max(1)), Ordering::SeqCst);
         shared_capture.ensure_running(target, fps);
         let rtc_arc = self.rtc.clone();
         let frame_rx = self.frame_rx.clone();
+        let frame_notify = self.frame_notify.clone();
+        let stopped = self.stopped.clone();
         let video_mid_slot = self.video_mid.clone();
         let capture_switch_lock = self.capture_switch_lock.clone();
         let capture_generation = self.capture_generation.clone();
         let rtp_timestamp_step = self.rtp_timestamp_step.clone();
         let peer_for_subscription = self.clone();
 
-        std::thread::spawn(move || {
-            let mut buf = vec![0u8; 2000];
-            let mut video_mid: Option<Mid> = None;
-            let mut timestamp: i64 = 0;
-            let mut subscribed = false;
-            'outer: loop {
-                // Drain every output (events / transmit packets / pending timeouts)
-                // before falling back to the network read. str0m::Rtc::poll_output
-                // returns None once the queue is empty.
-                loop {
-                    let poll_result = {
-                        let mut guard = rtc_arc.lock();
-                        let Some(rtc) = guard.as_mut() else {
-                            break 'outer;
-                        };
-                        rtc.poll_output()
-                    };
-                    match poll_result {
-                        Ok(Output::Timeout(deadline)) => {
-                            let now = Instant::now();
-                            if deadline <= now {
-                                if let Some(rtc) = rtc_arc.lock().as_mut() {
-                                    let _ = rtc.handle_input(Input::Timeout(now));
-                                }
-                                continue;
-                            }
-                            break;
-                        }
-                        Ok(Output::Transmit(packet)) => {
-                            if let Err(err) = socket.send_to(&packet.contents, packet.destination) {
-                                tracing::warn!(
-                                    "host: socket send failed ({} bytes -> {}): {err}",
-                                    packet.contents.len(),
-                                    packet.destination
-                                );
-                            }
-                        }
-                        Ok(Output::Event(Event::MediaAdded(event)))
-                            if event.kind == MediaKind::Video =>
-                        {
-                            video_mid = Some(event.mid);
-                            *video_mid_slot.lock() = video_mid;
-                            tracing::info!(
-                                "host: MediaAdded mid={:?} direction={:?}",
-                                event.mid,
-                                event.direction
-                            );
-                            if !subscribed {
-                                shared_capture
-                                    .subscribe(connection_id.clone(), &peer_for_subscription);
-                                subscribed = true;
-                            }
-                        }
-                        Ok(Output::Event(Event::IceConnectionStateChange(
-                            str0m::IceConnectionState::Disconnected,
-                        ))) => break 'outer,
-                        Ok(Output::Event(_)) => {}
-                        Err(RtcError::Ice(_)) => break 'outer,
-                        Err(error) => {
-                            tracing::error!("host: rtc error: {error}");
-                            break 'outer;
-                        }
-                    }
-                }
+        let loop_fut = async move {
+            run_rtc_event_loop(
+                socket,
+                rtc_arc,
+                frame_rx,
+                frame_notify,
+                stopped,
+                video_mid_slot,
+                capture_switch_lock,
+                capture_generation,
+                rtp_timestamp_step,
+                shared_capture,
+                peer_for_subscription,
+                connection_id,
+            )
+            .await;
+        };
 
-                if let Some(mid) = video_mid {
-                    if let Some(queued) = dequeue_queued_frame(&frame_rx) {
-                        let _switch = capture_switch_lock.lock();
-                        if capture_generation.load(Ordering::SeqCst) != queued.generation {
-                            continue;
-                        }
-                        let frame = queued.frame;
-                        if frame.data.is_empty() {
-                            continue;
-                        }
-                        if should_drop_encoded_frame(frame.captured_at.elapsed(), frame.keyframe) {
-                            tracing::debug!("host: dropping stale encoded frame");
-                            continue;
-                        }
-                        let now = Instant::now();
-                        let mut guard = rtc_arc.lock();
-                        if let Some(rtc) = guard.as_mut() {
-                            if let Some(writer) = rtc.writer(mid) {
-                                // Find the H.264 PayloadParams. payload_params() returns
-                                // every configured PT (opus, vp8, vp9, h264, ...) so we
-                                // can't just take .first(); the first one is opus PT 111
-                                // by default, which would silently drop every H.264 frame.
-                                let h264_pt = writer
-                                    .payload_params()
-                                    .iter()
-                                    .find(|p| matches!(p.spec().codec, str0m::format::Codec::H264));
-                                let pt = match h264_pt {
-                                    Some(p) => p.pt(),
-                                    None => {
-                                        tracing::warn!(
-                                            "host: no H264 PT in payload_params for mid={:?}",
-                                            mid
-                                        );
-                                        continue;
-                                    }
-                                };
-                                if let Err(error) = writer.write(
-                                    pt,
-                                    now,
-                                    MediaTime::new(timestamp, 90_000),
-                                    frame.data,
-                                ) {
-                                    tracing::warn!("host: H.264 writer failed: {error}");
-                                }
-                                let current_fps = (90_000
-                                    / rtp_timestamp_step.load(Ordering::SeqCst).max(1))
-                                    as u32;
-                                timestamp = advance_rtp_timestamp(timestamp, current_fps);
-                                // Drive packetization and pacing for the sample we
-                                // just queued. str0m holds onto the sample in
-                                // `to_payload` until we feed it Input::Timeout.
-                                if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
-                                    tracing::warn!(
-                                        "host: failed to flush timeout after write: {error}"
-                                    );
-                                }
-                                // Drain any pending transmits/media events immediately
-                                // instead of waiting for the next outer poll_output
-                                // iteration, otherwise pacing pushes them out later and
-                                // the viewer stays black until enough frames are queued.
-                                loop {
-                                    let drained = {
-                                        // Reuse the existing guard rather than re-locking
-                                        // (deadlocks the same-thread mutex otherwise).
-                                        let rtc = match guard.as_mut() {
-                                            Some(rtc) => rtc,
-                                            None => break,
-                                        };
-                                        rtc.poll_output()
-                                    };
-                                    match drained {
-                                        Ok(Output::Transmit(packet)) => {
-                                            let _ = socket
-                                                .send_to(&packet.contents, packet.destination);
-                                        }
-                                        Ok(Output::Timeout(_)) => break,
-                                        Ok(Output::Event(_)) => {}
-                                        Err(error) => {
-                                            tracing::warn!("host: post-write poll error: {error}");
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(loop_fut);
+        } else {
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to create fallback tokio runtime");
+                rt.block_on(loop_fut);
+            });
+        }
 
+        Ok(())
+    }
+}
+
+enum DrainOutcome {
+    Timeout(Instant),
+    Closed,
+}
+
+async fn drain_rtc(
+    rtc_arc: &Arc<Mutex<Option<Rtc>>>,
+    socket: &tokio::net::UdpSocket,
+    video_mid: &mut Option<Mid>,
+    video_mid_slot: &Arc<Mutex<Option<Mid>>>,
+    shared_capture: &Arc<SharedCapture>,
+    peer_for_subscription: &Arc<HostPeer>,
+    connection_id: &str,
+    subscribed: &mut bool,
+) -> DrainOutcome {
+    loop {
+        let poll_result = {
+            let mut guard = rtc_arc.lock();
+            let Some(rtc) = guard.as_mut() else {
+                return DrainOutcome::Closed;
+            };
+            rtc.poll_output()
+        };
+        match poll_result {
+            Ok(Output::Timeout(deadline)) => {
                 let now = Instant::now();
-                let _ = socket.set_read_timeout(Some(Duration::from_millis(10)));
-                match socket.recv_from(&mut buf) {
-                    Ok((n, source)) => {
-                        let destination = match socket.local_addr() {
-                            Ok(value) => value,
-                            Err(_) => break 'outer,
-                        };
-                        let contents = match buf[..n].try_into() {
-                            Ok(value) => value,
-                            Err(_) => continue,
-                        };
-                        let input = Input::Receive(
-                            now,
-                            Receive {
-                                source,
-                                destination,
-                                contents,
-                            },
-                        );
-                        if let Some(rtc) = rtc_arc.lock().as_mut() {
-                            if let Err(error) = rtc.handle_input(input) {
-                                tracing::warn!("host: failed to handle UDP input: {error}");
-                            }
-                        }
+                if deadline <= now {
+                    if let Some(rtc) = rtc_arc.lock().as_mut() {
+                        let _ = rtc.handle_input(Input::Timeout(now));
                     }
-                    Err(error)
-                        if matches!(
-                            error.kind(),
-                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                        ) =>
-                    {
-                        if let Some(rtc) = rtc_arc.lock().as_mut() {
-                            let _ = rtc.handle_input(Input::Timeout(now));
-                        }
-                    }
-                    Err(_) => break 'outer,
+                    continue;
+                }
+                return DrainOutcome::Timeout(deadline);
+            }
+            Ok(Output::Transmit(packet)) => {
+                if let Err(err) = socket.send_to(&packet.contents, packet.destination).await {
+                    tracing::warn!(
+                        "host: socket send failed ({} bytes -> {}): {err}",
+                        packet.contents.len(),
+                        packet.destination
+                    );
                 }
             }
+            Ok(Output::Event(Event::MediaAdded(event))) if event.kind == MediaKind::Video => {
+                *video_mid = Some(event.mid);
+                *video_mid_slot.lock() = *video_mid;
+                tracing::info!(
+                    "host: MediaAdded mid={:?} direction={:?}",
+                    event.mid,
+                    event.direction
+                );
+                if !*subscribed {
+                    shared_capture.subscribe(connection_id.to_string(), peer_for_subscription);
+                    *subscribed = true;
+                }
+            }
+            Ok(Output::Event(Event::IceConnectionStateChange(
+                str0m::IceConnectionState::Disconnected,
+            ))) => {
+                tracing::info!("host: IceConnectionStateChange Disconnected");
+                return DrainOutcome::Closed;
+            }
+            Ok(Output::Event(_)) => {}
+            Err(RtcError::Ice(_)) => {
+                tracing::info!("host: str0m ICE closed/error");
+                return DrainOutcome::Closed;
+            }
+            Err(error) => {
+                tracing::error!("host: rtc error: {error}");
+                return DrainOutcome::Closed;
+            }
+        }
+    }
+}
+
+fn write_video_frame(
+    mid: Mid,
+    queued: QueuedEncodedFrame,
+    capture_switch_lock: &Arc<Mutex<()>>,
+    capture_generation: &Arc<AtomicU64>,
+    rtc_arc: &Arc<Mutex<Option<Rtc>>>,
+    rtp_timestamp_step: &Arc<AtomicI64>,
+    timestamp: &mut i64,
+) -> bool {
+    let _switch = capture_switch_lock.lock();
+    if capture_generation.load(Ordering::SeqCst) != queued.generation {
+        return false;
+    }
+    let frame = queued.frame;
+    if frame.data.is_empty() {
+        return false;
+    }
+    if should_drop_encoded_frame(frame.captured_at.elapsed(), frame.keyframe) {
+        tracing::debug!("host: dropping stale encoded frame");
+        return false;
+    }
+    let now = Instant::now();
+    let mut guard = rtc_arc.lock();
+    if let Some(rtc) = guard.as_mut() {
+        if let Some(writer) = rtc.writer(mid) {
+            // Find the H.264 PayloadParams. payload_params() returns
+            // every configured PT (opus, vp8, vp9, h264, ...) so we
+            // can't just take .first(); the first one is opus PT 111
+            // by default, which would silently drop every H.264 frame.
+            let h264_pt = writer
+                .payload_params()
+                .iter()
+                .find(|p| matches!(p.spec().codec, str0m::format::Codec::H264));
+            let pt = match h264_pt {
+                Some(p) => p.pt(),
+                None => {
+                    tracing::warn!("host: no H264 PT in payload_params for mid={:?}", mid);
+                    return false;
+                }
+            };
+            if let Err(error) = writer.write(
+                pt,
+                now,
+                MediaTime::new(*timestamp, 90_000),
+                frame.data,
+            ) {
+                tracing::warn!("host: H.264 writer failed: {error}");
+                return false;
+            }
+            let current_fps = (90_000 / rtp_timestamp_step.load(Ordering::SeqCst).max(1)) as u32;
+            *timestamp = advance_rtp_timestamp(*timestamp, current_fps);
+            // Drive packetization and pacing for the sample we just queued.
+            // str0m holds onto the sample in `to_payload` until we feed it Input::Timeout.
+            if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
+                tracing::warn!("host: failed to flush timeout after write: {error}");
+            }
+            return true;
+        }
+    }
+    false
+}
+
+async fn run_rtc_event_loop(
+    socket: tokio::net::UdpSocket,
+    rtc_arc: Arc<Mutex<Option<Rtc>>>,
+    frame_rx: Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+    frame_notify: Arc<tokio::sync::Notify>,
+    stopped: Arc<AtomicBool>,
+    video_mid_slot: Arc<Mutex<Option<Mid>>>,
+    capture_switch_lock: Arc<Mutex<()>>,
+    capture_generation: Arc<AtomicU64>,
+    rtp_timestamp_step: Arc<AtomicI64>,
+    shared_capture: Arc<SharedCapture>,
+    peer_for_subscription: Arc<HostPeer>,
+    connection_id: String,
+) {
+    let mut buf = vec![0u8; 2000];
+    let mut video_mid: Option<Mid> = None;
+    let mut timestamp: i64 = 0;
+    let mut subscribed = false;
+
+    let local_addr = match socket.local_addr() {
+        Ok(addr) => addr,
+        Err(e) => {
+            tracing::error!("host: failed to get local_addr: {e}");
+            return;
+        }
+    };
+
+    let mut next_deadline = match drain_rtc(
+        &rtc_arc,
+        &socket,
+        &mut video_mid,
+        &video_mid_slot,
+        &shared_capture,
+        &peer_for_subscription,
+        &connection_id,
+        &mut subscribed,
+    )
+    .await
+    {
+        DrainOutcome::Timeout(d) => d,
+        DrainOutcome::Closed => {
             if subscribed {
                 shared_capture.unsubscribe(&connection_id);
             }
-        });
-        Ok(())
+            return;
+        }
+    };
+
+    'outer: loop {
+        if stopped.load(Ordering::SeqCst) {
+            break 'outer;
+        }
+
+        // Drain any pending frames if video_mid is known
+        if let Some(mid) = video_mid {
+            while let Some(queued) = dequeue_queued_frame(&frame_rx) {
+                if write_video_frame(
+                    mid,
+                    queued,
+                    &capture_switch_lock,
+                    &capture_generation,
+                    &rtc_arc,
+                    &rtp_timestamp_step,
+                    &mut timestamp,
+                ) {
+                    match drain_rtc(
+                        &rtc_arc,
+                        &socket,
+                        &mut video_mid,
+                        &video_mid_slot,
+                        &shared_capture,
+                        &peer_for_subscription,
+                        &connection_id,
+                        &mut subscribed,
+                    )
+                    .await
+                    {
+                        DrainOutcome::Timeout(d) => next_deadline = d,
+                        DrainOutcome::Closed => break 'outer,
+                    }
+                }
+            }
+        }
+
+        let now = Instant::now();
+        let delay = if next_deadline <= now {
+            Duration::ZERO
+        } else {
+            (next_deadline - now).min(Duration::from_secs(60))
+        };
+
+        tokio::select! {
+            biased;
+
+            _ = frame_notify.notified() => {
+                if stopped.load(Ordering::SeqCst) {
+                    break 'outer;
+                }
+                if let Some(mid) = video_mid {
+                    while let Some(queued) = dequeue_queued_frame(&frame_rx) {
+                        if write_video_frame(
+                            mid,
+                            queued,
+                            &capture_switch_lock,
+                            &capture_generation,
+                            &rtc_arc,
+                            &rtp_timestamp_step,
+                            &mut timestamp,
+                        ) {
+                            match drain_rtc(
+                                &rtc_arc,
+                                &socket,
+                                &mut video_mid,
+                                &video_mid_slot,
+                                &shared_capture,
+                                &peer_for_subscription,
+                                &connection_id,
+                                &mut subscribed,
+                            )
+                            .await
+                            {
+                                DrainOutcome::Timeout(d) => next_deadline = d,
+                                DrainOutcome::Closed => break 'outer,
+                            }
+                        }
+                    }
+                }
+            }
+
+            recv_res = socket.recv_from(&mut buf) => {
+                if stopped.load(Ordering::SeqCst) {
+                    break 'outer;
+                }
+                match recv_res {
+                    Ok((n, source)) => {
+                        let now = Instant::now();
+                        if let Ok(contents) = buf[..n].try_into() {
+                            let input = Input::Receive(
+                                now,
+                                Receive {
+                                    source,
+                                    destination: local_addr,
+                                    contents,
+                                },
+                            );
+                            if let Some(rtc) = rtc_arc.lock().as_mut() {
+                                if let Err(error) = rtc.handle_input(input) {
+                                    tracing::warn!("host: failed to handle UDP input: {error}");
+                                }
+                            }
+                            match drain_rtc(
+                                &rtc_arc,
+                                &socket,
+                                &mut video_mid,
+                                &video_mid_slot,
+                                &shared_capture,
+                                &peer_for_subscription,
+                                &connection_id,
+                                &mut subscribed,
+                            )
+                            .await
+                            {
+                                DrainOutcome::Timeout(d) => next_deadline = d,
+                                DrainOutcome::Closed => break 'outer,
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!("host: socket recv error: {error}");
+                        break 'outer;
+                    }
+                }
+            }
+
+            _ = tokio::time::sleep(delay) => {
+                if stopped.load(Ordering::SeqCst) {
+                    break 'outer;
+                }
+                let now = Instant::now();
+                if let Some(rtc) = rtc_arc.lock().as_mut() {
+                    let _ = rtc.handle_input(Input::Timeout(now));
+                }
+                match drain_rtc(
+                    &rtc_arc,
+                    &socket,
+                    &mut video_mid,
+                    &video_mid_slot,
+                    &shared_capture,
+                    &peer_for_subscription,
+                    &connection_id,
+                    &mut subscribed,
+                )
+                .await
+                {
+                    DrainOutcome::Timeout(d) => next_deadline = d,
+                    DrainOutcome::Closed => break 'outer,
+                }
+            }
+        }
+    }
+
+    if subscribed {
+        shared_capture.unsubscribe(&connection_id);
     }
 }
