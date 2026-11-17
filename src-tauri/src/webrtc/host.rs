@@ -308,14 +308,8 @@ impl SharedCapture {
                 .filter_map(Weak::upgrade)
                 .collect::<Vec<_>>()
         };
-        let mut any_dropped = false;
         for peer in peers {
-            if !peer.enqueue_shared_frame(frame.clone()) {
-                any_dropped = true;
-            }
-        }
-        if any_dropped {
-            self.request_keyframe();
+            peer.enqueue_shared_frame(frame.clone());
         }
     }
 
@@ -578,9 +572,9 @@ pub struct HostPeer {
 
 impl HostPeer {
     pub fn new() -> Self {
-        // Keep a shallow queue (up to 3 frames) to absorb normal pipeline and
-        // transmission jitter without allowing lag accumulation.
-        let (tx, rx) = std::sync::mpsc::sync_channel::<QueuedEncodedFrame>(3);
+        // Keep a bounded queue (up to 8 frames, ~260ms at 30fps) to absorb normal pipeline and
+        // transmission jitter during rapid window motion without allowing lag accumulation.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<QueuedEncodedFrame>(8);
         Self {
             rtc: Arc::new(Mutex::new(None)),
             socket: Arc::new(Mutex::new(None)),

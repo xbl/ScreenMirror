@@ -44,7 +44,7 @@ mod native {
             .build()
             .map_err(|e| IOSurfaceEncoderError::Native(e.to_string()))?;
 
-        // Configure zero frame delay, CABAC entropy coding, and burst rate limits
+        // Configure zero frame delay and CABAC entropy coding
         unsafe {
             let delay_count: i32 = 0;
             let num = videotoolbox::ffi::CFNumberCreate(
@@ -70,43 +70,6 @@ mod native {
                 videotoolbox::ffi::kVTCompressionPropertyKey_H264EntropyMode,
                 videotoolbox::ffi::kVTH264EntropyMode_CABAC.cast(),
             );
-
-            // Cap instantaneous burst to 1.5x average bitrate over a 1-second window
-            // to prevent UDP packet bursts from overflowing Wi-Fi buffers
-            let bytes_per_sec = (((bitrate_kbps.max(1) as i64 * 1000) / 8 * 3 / 2) as i32).max(100_000);
-            let sec: f64 = 1.0;
-            let num_bytes = videotoolbox::ffi::CFNumberCreate(
-                videotoolbox::ffi::kCFAllocatorDefault,
-                videotoolbox::ffi::kCFNumberSInt32Type,
-                core::ptr::from_ref(&bytes_per_sec).cast(),
-            );
-            let num_sec = videotoolbox::ffi::CFNumberCreate(
-                videotoolbox::ffi::kCFAllocatorDefault,
-                videotoolbox::ffi::kCFNumberFloat64Type,
-                core::ptr::from_ref(&sec).cast(),
-            );
-            if !num_bytes.is_null() && !num_sec.is_null() {
-                let mut values: [*const core::ffi::c_void; 2] = [num_bytes.cast(), num_sec.cast()];
-                let array = apple_cf::raw::CFArrayCreate(
-                    videotoolbox::ffi::kCFAllocatorDefault.cast(),
-                    values.as_mut_ptr(),
-                    2,
-                    &apple_cf::raw::kCFTypeArrayCallBacks,
-                );
-                if !array.is_null() {
-                    let _ = session.set_property(
-                        videotoolbox::ffi::kVTCompressionPropertyKey_DataRateLimits,
-                        array.cast(),
-                    );
-                    videotoolbox::ffi::CFRelease(array.cast());
-                }
-            }
-            if !num_bytes.is_null() {
-                videotoolbox::ffi::CFRelease(num_bytes.cast());
-            }
-            if !num_sec.is_null() {
-                videotoolbox::ffi::CFRelease(num_sec.cast());
-            }
         }
 
         Ok(session)
@@ -158,6 +121,7 @@ mod native {
         /// change-driven, so a uniform per-frame PTS would distort playback
         /// rate after any static gap.
         pts_origin: std::time::Instant,
+        last_keyframe_time: std::time::Instant,
         sps_pps: Vec<u8>,
     }
 
@@ -181,6 +145,7 @@ mod native {
                 fallback_surface: None,
                 pts: 0,
                 pts_origin: std::time::Instant::now(),
+                last_keyframe_time: std::time::Instant::now(),
                 sps_pps: Vec::new(),
             })
         }
@@ -189,13 +154,19 @@ mod native {
         /// `CompressionSession::encode` API cannot pass per-frame
         /// properties (`kVTEncodeFrameOptionKey_ForceKeyFrame`), so rebuild
         /// the session instead — a fresh session always starts with an IDR.
-        /// Forced-IDR events are rare (only after a dropped frame), so the
-        /// rebuild cost is acceptable. On failure the old session is kept;
-        /// the stream then resynchronizes at the next GOP boundary.
+        /// Rebuilding destroys and reallocates the hardware encoder (30-50ms
+        /// stall), so throttle forced rebuilds to at most once per 1.0 second.
+        /// The natural GOP interval already guarantees an IDR every 1.0 second.
         pub fn force_keyframe(&mut self) {
+            let now = std::time::Instant::now();
+            if now.duration_since(self.last_keyframe_time) < std::time::Duration::from_millis(1000) {
+                tracing::debug!("throttling forced keyframe rebuild; natural GOP will refresh shortly");
+                return;
+            }
             match build_session(self.width, self.height, self.fps, self.bitrate_kbps) {
                 Ok(session) => {
                     self.session = session;
+                    self.last_keyframe_time = now;
                     // The new session has new SPS/PPS; re-extract lazily.
                     self.sps_pps.clear();
                 }
@@ -307,6 +278,7 @@ mod native {
                 coremedia_sync,
             );
             if keyframe {
+                self.last_keyframe_time = std::time::Instant::now();
                 let has_sps = crate::webrtc::video_toolbox::split_annex_b_nalus(&data)
                     .iter()
                     .any(|nal| nal.first().map(|byte| byte & 0x1f) == Some(7));
