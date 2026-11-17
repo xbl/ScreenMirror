@@ -5,10 +5,10 @@
 //! the WebRTC capture loop can select the source and fall back to xcap without
 //! exposing platform-specific types across the rest of the crate.
 
-use std::collections::VecDeque;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Condvar, Mutex,
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -42,27 +42,12 @@ pub enum ScreenKitError {
     Stopped,
 }
 
-pub(crate) struct ScreenKitFrameQueue {
-    pub(crate) frames: Mutex<VecDeque<ScreenKitFrame>>,
-    pub(crate) condvar: Condvar,
-}
-
-impl ScreenKitFrameQueue {
-    pub(crate) fn new() -> Self {
-        Self {
-            frames: Mutex::new(VecDeque::with_capacity(2)),
-            condvar: Condvar::new(),
-        }
-    }
-}
-
 /// Handle for a running ScreenCaptureKit stream.
 ///
-/// The frame receiver is bounded by the producer (shallow 2-frame queue),
-/// allowing consumers to discard stale samples before encode while preventing
-/// dropped frames during rapid motion bursts.
+/// The frame receiver is bounded by the producer (capacity one in the concrete
+/// implementation), allowing consumers to discard stale samples before encode.
 pub struct ScreenKitCapture {
-    queue: Arc<ScreenKitFrameQueue>,
+    frames: Arc<Mutex<Receiver<ScreenKitFrame>>>,
     stopped: Arc<AtomicBool>,
     #[cfg(all(target_os = "macos", feature = "screenkit"))]
     stream: Arc<Mutex<Option<screencapturekit::stream::sc_stream::SCStream>>>,
@@ -70,9 +55,9 @@ pub struct ScreenKitCapture {
 
 impl ScreenKitCapture {
     #[allow(dead_code)]
-    pub(crate) fn from_parts(queue: Arc<ScreenKitFrameQueue>, stopped: Arc<AtomicBool>) -> Self {
+    pub(crate) fn from_parts(frames: Receiver<ScreenKitFrame>, stopped: Arc<AtomicBool>) -> Self {
         Self {
-            queue,
+            frames: Arc::new(Mutex::new(frames)),
             stopped,
             #[cfg(all(target_os = "macos", feature = "screenkit"))]
             stream: Arc::new(Mutex::new(None)),
@@ -83,49 +68,29 @@ impl ScreenKitCapture {
         if self.stopped.load(Ordering::Acquire) {
             return Err(ScreenKitError::Stopped);
         }
-        let mut guard = self.queue.frames.lock().map_err(|_| ScreenKitError::Stopped)?;
-        let start = Instant::now();
-        while guard.is_empty() {
-            if self.stopped.load(Ordering::Acquire) {
-                return Err(ScreenKitError::Stopped);
-            }
-            let elapsed = start.elapsed();
-            if elapsed >= timeout {
-                return Err(ScreenKitError::Unavailable(
-                    "timed out waiting for a frame".into(),
-                ));
-            }
-            let remaining = timeout - elapsed;
-            let (next_guard, timeout_res) = self
-                .queue
-                .condvar
-                .wait_timeout(guard, remaining)
-                .map_err(|_| ScreenKitError::Stopped)?;
-            guard = next_guard;
-            if timeout_res.timed_out() && guard.is_empty() {
-                return Err(ScreenKitError::Unavailable(
-                    "timed out waiting for a frame".into(),
-                ));
-            }
+        let frames = self.frames.lock().map_err(|_| ScreenKitError::Stopped)?;
+        match frames.recv_timeout(timeout) {
+            Ok(frame) => Ok(frame),
+            Err(RecvTimeoutError::Timeout) => Err(ScreenKitError::Unavailable(
+                "timed out waiting for a frame".into(),
+            )),
+            Err(RecvTimeoutError::Disconnected) => Err(ScreenKitError::Stopped),
         }
-        guard
-            .pop_front()
-            .ok_or_else(|| ScreenKitError::Unavailable("no frame available".into()))
     }
 
     pub fn try_recv(&self) -> Result<ScreenKitFrame, ScreenKitError> {
-        if self.stopped.load(Ordering::Acquire) {
-            return Err(ScreenKitError::Stopped);
+        let frames = self.frames.lock().map_err(|_| ScreenKitError::Stopped)?;
+        match frames.try_recv() {
+            Ok(frame) => Ok(frame),
+            Err(TryRecvError::Empty) => {
+                Err(ScreenKitError::Unavailable("no frame available".into()))
+            }
+            Err(TryRecvError::Disconnected) => Err(ScreenKitError::Stopped),
         }
-        let mut guard = self.queue.frames.lock().map_err(|_| ScreenKitError::Stopped)?;
-        guard
-            .pop_front()
-            .ok_or_else(|| ScreenKitError::Unavailable("no frame available".into()))
     }
 
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
-        self.queue.condvar.notify_all();
     }
 }
 
@@ -247,10 +212,11 @@ pub fn start_screen_capture(
         .with_pixel_format(PixelFormat::BGRA);
     config.set_shows_cursor(true);
 
-    // Keep a shallow 2-frame queue to decouple real-time CoreMedia delivery
+    // Keep a shallow 2-frame channel to decouple real-time CoreMedia delivery
     // from the encoder loop without blocking either side.
-    let queue = Arc::new(ScreenKitFrameQueue::new());
-    let queue_handler = queue.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<ScreenKitFrame>(2);
+    let receiver_for_handler = Arc::new(Mutex::new(receiver));
+    let receiver_for_handler_callback = receiver_for_handler.clone();
     let stopped = Arc::new(AtomicBool::new(false));
     let stopped_for_handler = stopped.clone();
     let has_delivered_frame = Arc::new(AtomicBool::new(false));
@@ -318,17 +284,15 @@ pub fn start_screen_capture(
             // monotonic and is the timestamp consumed by the existing encoder age gate.
             captured_at: Instant::now(),
         };
-        // Keep a bounded 2-frame queue. Discard the oldest sample if the encoder
-        // is temporarily busy, guaranteeing minimal latency and zero frame drops on burst.
-        let sent = if let Ok(mut q) = queue_handler.frames.lock() {
-            if q.len() >= 2 {
-                q.pop_front();
+        // Keep only the newest sample. Use non-blocking try_lock so the CoreMedia
+        // real-time capture queue never blocks on a worker thread mutex.
+        let sent = if let Err(std::sync::mpsc::TrySendError::Full(frame)) = sender.try_send(frame) {
+            if let Ok(queued) = receiver_for_handler_callback.try_lock() {
+                let _ = queued.try_recv();
             }
-            q.push_back(frame);
-            queue_handler.condvar.notify_one();
-            true
+            sender.try_send(frame).is_ok()
         } else {
-            false
+            true
         };
         if sent {
             has_delivered_frame_handler.store(true, Ordering::Release);
@@ -342,7 +306,7 @@ pub fn start_screen_capture(
         .start_capture()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
     let capture = ScreenKitCapture {
-        queue,
+        frames: receiver_for_handler,
         stopped,
         stream: Arc::new(Mutex::new(Some(stream))),
     };

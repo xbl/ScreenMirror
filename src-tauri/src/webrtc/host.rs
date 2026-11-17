@@ -598,9 +598,6 @@ impl HostPeer {
 
     pub fn init(&self, host_ip: std::net::IpAddr) -> Result<(), String> {
         let socket = UdpSocket::bind(format!("{host_ip}:0")).map_err(|e| e.to_string())?;
-        let sock_ref = socket2::SockRef::from(&socket);
-        let _ = sock_ref.set_send_buffer_size(2 * 1024 * 1024);
-        let _ = sock_ref.set_recv_buffer_size(2 * 1024 * 1024);
         let local_addr = socket.local_addr().map_err(|e| e.to_string())?;
         let candidate = Candidate::host(local_addr).map_err(|e| e.to_string())?;
         let mut rtc = Rtc::new();

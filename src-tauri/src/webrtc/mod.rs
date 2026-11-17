@@ -732,13 +732,9 @@ pub fn spawn_video_capture_loop(
     let r = running.clone();
     let force_keyframe = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let encoder_force_keyframe = force_keyframe.clone();
-    // Keep a shallow 2-frame buffer. VideoToolbox hardware encode takes 2-3ms,
-    // so a 2-frame queue preserves continuous motion during rapid window dragging
-    // while strictly capping queuing latency to avoid stale frames.
-    let frame_slot = Arc::new((
-        Mutex::new(std::collections::VecDeque::<CapturedFrame>::with_capacity(2)),
-        Condvar::new(),
-    ));
+    // Keep exactly one pending capture. A slow encoder must consume the newest
+    // frame available, never a queue of already-stale frames.
+    let frame_slot = Arc::new((Mutex::new(None::<CapturedFrame>), Condvar::new()));
     let encoder_frame_slot = frame_slot.clone();
     let encoder_running = running.clone();
     let encoder_sink = sink.clone();
@@ -756,20 +752,20 @@ pub fn spawn_video_capture_loop(
         while encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
             let mut frame = {
                 let (lock, wake) = &*encoder_frame_slot;
-                let mut queue = match lock.lock() {
-                    Ok(guard) => guard,
+                let mut slot = match lock.lock() {
+                    Ok(slot) => slot,
                     Err(_) => break,
                 };
-                while queue.is_empty() && encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
-                    match wake.wait_timeout(queue, Duration::from_millis(100)) {
-                        Ok((next, _)) => queue = next,
+                while slot.is_none() && encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
+                    match wake.wait_timeout(slot, Duration::from_millis(100)) {
+                        Ok((next, _)) => slot = next,
                         Err(_) => return,
                     }
                 }
                 if !encoder_running.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
-                match queue.pop_front() {
+                match slot.take() {
                     Some(frame) => frame,
                     None => continue,
                 }
@@ -1161,11 +1157,8 @@ pub fn spawn_video_capture_loop(
                     frames = frames.wrapping_add(1);
                     let (slot, wake) = &*frame_slot;
                     match slot.lock() {
-                        Ok(mut queue) => {
-                            if queue.len() >= 2 {
-                                queue.pop_front();
-                            }
-                            queue.push_back(frame);
+                        Ok(mut current) => {
+                            *current = Some(frame);
                             wake.notify_one();
                         }
                         Err(_) => break,
