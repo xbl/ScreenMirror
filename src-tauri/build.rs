@@ -3,6 +3,16 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" {
+        println!("cargo:rerun-if-changed=src/virtual_display.m");
+        println!("cargo:rerun-if-changed=src/virtual_display.h");
+        cc::Build::new()
+            .file("src/virtual_display.m")
+            .flag("-fobjc-arc")
+            .compile("sm_virtual_display");
+    }
+
     if env::var_os("CARGO_FEATURE_SCREENKIT").is_some() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
         tauri_build::build();

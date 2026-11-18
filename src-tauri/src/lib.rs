@@ -110,6 +110,7 @@ pub mod network;
 pub mod permissions;
 pub mod signaling;
 pub(crate) mod storage;
+pub(crate) mod virtual_display;
 pub mod webrtc;
 
 #[derive(Default, Clone)]
@@ -221,38 +222,43 @@ pub fn run() {
         .manage(command_state)
         .manage(cli_ip_state)
         .invoke_handler(tauri::generate_handler![
-            commands::get_lan_ip,
-            commands::check_wifi_connection,
             commands::check_screen_recording_permission,
-            commands::request_screen_recording_permission,
-            commands::open_screen_recording_settings,
-            commands::get_port,
-            commands::get_app_language,
-            commands::set_app_language,
-            commands::get_is_first_time_start,
-            commands::set_app_started_once,
-            commands::get_current_version,
-            commands::open_external_link,
-            commands::write_text_to_clipboard,
-            commands::relaunch_app,
-            commands::exit_app,
-            commands::get_connected_devices,
-            commands::is_viewer_slot_available,
-            commands::create_waiting_session,
-            commands::reset_waiting_session,
-            commands::set_desktop_capturer_source_id,
-            commands::get_waiting_source_id,
-            commands::start_sharing,
-            commands::get_pending_device,
-            commands::set_device_connected_status,
-            commands::enumerate_capture_sources,
+            commands::check_wifi_connection,
+            commands::close_source_picker_window,
             commands::close_tray_panel,
+            commands::create_virtual_display,
+            commands::create_waiting_session,
+            commands::destroy_all_virtual_displays,
+            commands::destroy_virtual_display,
+            commands::enumerate_capture_sources,
+            commands::exit_app,
+            commands::get_active_virtual_displays,
+            commands::get_app_language,
             commands::get_capture_source_preview,
             commands::get_capture_target,
+            commands::get_connected_devices,
+            commands::get_current_version,
+            commands::get_is_first_time_start,
+            commands::get_lan_ip,
+            commands::get_pending_device,
+            commands::get_port,
+            commands::get_waiting_source_id,
+            commands::is_viewer_slot_available,
+            commands::is_virtual_display_supported,
+            commands::open_external_link,
+            commands::open_screen_recording_settings,
             commands::open_source_picker_window,
-            commands::close_source_picker_window,
+            commands::relaunch_app,
+            commands::request_screen_recording_permission,
+            commands::reset_waiting_session,
+            commands::set_app_language,
+            commands::set_app_started_once,
             commands::set_capture_target,
+            commands::set_desktop_capturer_source_id,
+            commands::set_device_connected_status,
+            commands::start_sharing,
             commands::start_source_picker_drag,
+            commands::write_text_to_clipboard,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

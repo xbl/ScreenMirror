@@ -58,9 +58,25 @@
               <span v-else class="sp-preview-fallback">{{ t('source.previewLoading') }}</span>
             </span>
             <span class="sp-type-copy">
-              <strong>{{ t('source.extendedDisplays') }}</strong>
+              <strong>
+                {{ screen.isVirtual ? t('source.virtualDisplayBadge') : t('source.extendedDisplays') }}
+                <span v-if="screen.isVirtual" class="sp-virtual-badge">{{ t('source.virtualDisplayBadge') }}</span>
+              </strong>
               <small>{{ screen.name }} · {{ t('source.extendedDescription') }}</small>
             </span>
+          </button>
+        </div>
+
+        <div class="sp-virtual-section">
+          <button
+            class="sp-create-virtual-btn"
+            type="button"
+            data-source-type="virtual"
+            :disabled="creatingVirtual"
+            @click="handleCreateVirtualDisplay"
+          >
+            <span class="sp-virtual-plus" aria-hidden="true">+</span>
+            <span>{{ creatingVirtual ? t('source.loading') : t('source.createVirtualDisplay') }}</span>
           </button>
         </div>
         <p v-if="!primaryScreen && !extendedScreens.length && !orderedWindows.length" class="sp-empty">{{ t('source.noSources') }}</p>
@@ -102,8 +118,18 @@
       <div v-if="loading && !selectedSource" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
       <div v-else class="sp-current" data-testid="source-preview" aria-live="polite">
         <div class="sp-current-preview"><img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" /><span v-else>{{ previewLoading ? t('source.previewLoading') : t('source.noPreview') }}</span></div>
-        <div class="sp-current-copy"><span class="sp-current-label">{{ t('source.current') }}</span><strong>{{ selectedSource?.name || t('source.noSources') }}</strong><small v-if="selectedSource">{{ resolution(selectedSource) }}</small></div>
-        <button class="sp-change" type="button" @click="openPicker">{{ t('source.change') }}</button>
+        <div class="sp-current-copy">
+          <span class="sp-current-label">
+            {{ t('source.current') }}
+            <span v-if="selectedSource?.isVirtual" class="sp-virtual-badge">{{ t('source.virtualDisplayBadge') }}</span>
+          </span>
+          <strong>{{ selectedSource?.name || t('source.noSources') }}</strong>
+          <small v-if="selectedSource">{{ resolution(selectedSource) }}</small>
+        </div>
+        <div class="sp-current-actions">
+          <button v-if="selectedSource?.isVirtual" class="sp-destroy-virtual" type="button" :title="t('source.destroyVirtualDisplay')" @click="handleDestroySelectedVirtual">&#10005;</button>
+          <button class="sp-change" type="button" @click="openPicker">{{ t('source.change') }}</button>
+        </div>
       </div>
       <label class="sp-quality"><span>{{ t('source.quality') }}</span><select :value="quality" :disabled="!selectedSource" @change="changeQuality"><option value="balanced">{{ t('source.qualityBalanced') }}</option><option value="high">{{ t('source.qualityHigh') }}</option><option value="ultra">{{ t('source.qualityUltra') }}</option></select></label>
     </template>
@@ -196,6 +222,45 @@ async function selectSource(source: CaptureSourceInfo, nextQuality = quality.val
 async function selectAndClose(source: CaptureSourceInfo) {
   const selected = await selectSource(source);
   if (selected) await closePicker();
+}
+
+const creatingVirtual = ref(false);
+
+async function handleCreateVirtualDisplay() {
+  if (creatingVirtual.value) return;
+  creatingVirtual.value = true;
+  error.value = '';
+  try {
+    const displayId = await api.createVirtualDisplay({
+      name: 'ScreenMirror Virtual Display',
+      width: 1920,
+      height: 1080,
+      refreshRate: 60,
+      hiDpi: false,
+    });
+    await refreshSources(true);
+    const virtualSource = sources.value.find((s) => s.sourceId === String(displayId));
+    if (virtualSource) {
+      await selectAndClose(virtualSource);
+    }
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    creatingVirtual.value = false;
+  }
+}
+
+async function handleDestroySelectedVirtual() {
+  if (!selectedSource.value?.isVirtual) return;
+  const idNum = Number(selectedSource.value.sourceId);
+  if (!Number.isNaN(idNum)) {
+    try {
+      await api.destroyVirtualDisplay(idNum);
+      await refreshSources(true);
+    } catch (e) {
+      error.value = String(e);
+    }
+  }
 }
 
 function refreshPreview(source: CaptureSourceInfo, generation: number, forceRefresh: boolean, attempt = 0) {
@@ -370,5 +435,14 @@ onBeforeUnmount(() => {
 .sp-current-copy small { color: var(--muted); }
 .sp-quality { padding-top: 12px; border-top: var(--line); color: var(--muted); font-size: 13px; }
 .sp-quality select { min-width: 150px; padding: 8px 10px; color: var(--text); border: var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); }
+.sp-virtual-section { display: flex; justify-content: center; margin: 12px 0 4px; }
+.sp-create-virtual-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--accent); font-size: 13px; font-weight: 600; border: 1px dashed var(--accent); border-radius: var(--radius-md); background: var(--control); cursor: pointer; transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out; }
+.sp-create-virtual-btn:hover { background: var(--accent-dim); }
+.sp-create-virtual-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sp-virtual-plus { font-size: 16px; font-weight: 700; line-height: 1; }
+.sp-virtual-badge { display: inline-block; margin-left: 6px; padding: 2px 6px; font-size: 10px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 4px; text-transform: none; vertical-align: middle; }
+.sp-current-actions { display: flex; align-items: center; gap: 6px; }
+.sp-destroy-virtual { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--danger); font-size: 14px; font-weight: 600; border: 1px solid var(--danger-dim); border-radius: var(--radius-sm); background: transparent; cursor: pointer; }
+.sp-destroy-virtual:hover { background: var(--danger-dim); }
 @media (max-width: 680px) { .source-picker-standalone { padding: 28px 20px 20px; } .sp-type-grid { grid-template-columns: 1fr; } .sp-type-card { flex-direction: row; align-items: center; text-align: left; } .sp-type-visual { width: 132px; flex: 0 0 132px; } .sp-type-copy small { min-height: 0; } }
 </style>

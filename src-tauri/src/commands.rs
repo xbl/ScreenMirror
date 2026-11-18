@@ -106,12 +106,14 @@ pub fn write_text_to_clipboard(_text: String) -> Result<(), String> {
 #[tauri::command]
 #[allow(unreachable_code)]
 pub fn relaunch_app(app: AppHandle) -> Result<(), String> {
+    crate::virtual_display::destroy_all();
     app.restart();
     Ok(())
 }
 
 #[tauri::command]
 pub fn exit_app(app: AppHandle) {
+    crate::virtual_display::destroy_all();
     app.exit(0);
 }
 
@@ -341,6 +343,102 @@ pub fn set_capture_target(
     app.emit("capture-target-changed", target_event)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn is_virtual_display_supported() -> bool {
+    crate::virtual_display::is_supported()
+}
+
+#[tauri::command]
+pub fn create_virtual_display(
+    config: crate::virtual_display::VirtualDisplayConfig,
+) -> Result<u32, String> {
+    crate::virtual_display::create_display(&config)
+}
+
+#[tauri::command]
+pub fn destroy_virtual_display(
+    state: State<'_, CommandState>,
+    app: AppHandle,
+    display_id: u32,
+) -> Result<(), String> {
+    let revert_target = {
+        let current_target = state.capture_target.lock();
+        if let Some(target) = current_target.as_ref() {
+            target.kind == crate::webrtc::CaptureKind::Screen
+                && target.source_id.as_deref() == Some(&display_id.to_string())
+        } else {
+            false
+        }
+    };
+
+    crate::virtual_display::destroy_display(display_id)?;
+
+    if revert_target {
+        let _ = set_capture_target(
+            state,
+            app,
+            CaptureTargetArgs {
+                kind: "screen".into(),
+                id: 0,
+                source_id: None,
+                quality: None,
+            },
+        );
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn destroy_all_virtual_displays(
+    state: State<'_, CommandState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let had_virtual_target = {
+        let active_ids = crate::virtual_display::get_active_ids();
+        let current_target = state.capture_target.lock();
+        if let Some(target) = current_target.as_ref() {
+            if target.kind == crate::webrtc::CaptureKind::Screen {
+                if let Some(sid) = &target.source_id {
+                    if let Ok(id_num) = sid.parse::<u32>() {
+                        active_ids.contains(&id_num)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    crate::virtual_display::destroy_all();
+
+    if had_virtual_target {
+        let _ = set_capture_target(
+            state,
+            app,
+            CaptureTargetArgs {
+                kind: "screen".into(),
+                id: 0,
+                source_id: None,
+                quality: None,
+            },
+        );
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_active_virtual_displays() -> Vec<u32> {
+    crate::virtual_display::get_active_ids()
 }
 
 #[cfg(test)]

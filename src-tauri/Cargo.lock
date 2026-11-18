@@ -3995,6 +3995,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bindgen 0.70.1",
+ "cc",
  "core-foundation 0.10.1",
  "directories",
  "futures-util",

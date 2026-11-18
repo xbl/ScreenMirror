@@ -9,6 +9,11 @@ const apiMocks = vi.hoisted(() => ({
   getCaptureTarget: vi.fn(),
   setCaptureTarget: vi.fn(),
   startSourcePickerDrag: vi.fn(),
+  createVirtualDisplay: vi.fn(),
+  destroyVirtualDisplay: vi.fn(),
+  destroyAllVirtualDisplays: vi.fn(),
+  getActiveVirtualDisplays: vi.fn(),
+  isVirtualDisplaySupported: vi.fn(),
 }));
 const windowMocks = vi.hoisted(() => ({ close: vi.fn() }));
 const eventMocks = vi.hoisted(() => ({ listen: vi.fn() }));
@@ -27,7 +32,7 @@ const i18n = createI18n({
   legacy: false,
   locale: 'en',
   messages: { en: { source: {
-    label: 'Sharing source', current: 'Currently sharing', change: 'Change', chooseType: 'Choose what to share', chooseWindow: 'Choose a window or app', entireScreenDescription: 'Share the primary display', windowsDescription: 'Share one running window or app', extendedDescription: 'Use an extended display', runningWindows: 'Running windows and apps', back: 'Back', close: 'Close', cancel: 'Cancel', entireScreen: 'Entire screen', windowsAndApps: 'Window or app', extendedDisplays: 'Extended displays', primary: 'Primary display', resolution: '{width} x {height}', refresh: 'Refresh sources', loading: 'Loading...', noSources: 'No sources', previewLoading: 'Loading preview...', noPreview: 'No preview available', quality: 'Quality', qualityBalanced: 'Balanced', qualityHigh: 'High', qualityUltra: 'Ultra', errorEnumerate: 'Could not load sources', errorSwitch: 'Could not switch',
+    label: 'Sharing source', current: 'Currently sharing', change: 'Change', chooseType: 'Choose what to share', chooseWindow: 'Choose a window or app', entireScreenDescription: 'Share the primary display', windowsDescription: 'Share one running window or app', extendedDescription: 'Use an extended display', runningWindows: 'Running windows and apps', back: 'Back', close: 'Close', cancel: 'Cancel', entireScreen: 'Entire screen', windowsAndApps: 'Window or app', extendedDisplays: 'Extended displays', createVirtualDisplay: 'New Virtual Display', createVirtualDisplayDescription: 'Create a virtual desktop', virtualDisplayBadge: 'Virtual Display', destroyVirtualDisplay: 'Remove Display', primary: 'Primary display', resolution: '{width} x {height}', refresh: 'Refresh sources', loading: 'Loading...', noSources: 'No sources', previewLoading: 'Loading preview...', noPreview: 'No preview available', quality: 'Quality', qualityBalanced: 'Balanced', qualityHigh: 'High', qualityUltra: 'Ultra', errorEnumerate: 'Could not load sources', errorSwitch: 'Could not switch',
   } } },
 });
 
@@ -228,5 +233,64 @@ describe('SourcePicker', () => {
     await flushPromises();
 
     expect(wrapper.get('.sp-current-copy strong').text()).toBe('Terminal');
+  });
+
+  it('creates and selects a virtual display from the standalone picker', async () => {
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    apiMocks.createVirtualDisplay.mockResolvedValueOnce(99);
+    const virtualSource = {
+      id: 'screen:2',
+      sourceId: '99',
+      name: 'ScreenMirror Virtual Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1920,
+      height: 1080,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+
+    await wrapper.get('[data-source-type="virtual"]').trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.createVirtualDisplay).toHaveBeenCalledTimes(1);
+    expect(apiMocks.setCaptureTarget).toHaveBeenCalledWith({
+      kind: 'screen',
+      id: 2,
+      sourceId: '99',
+      quality: 0.75,
+    });
+    expect(windowMocks.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows virtual display badge and allows destroying from embedded card', async () => {
+    const virtualSource = {
+      id: 'screen:2',
+      sourceId: '99',
+      name: 'ScreenMirror Virtual Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1920,
+      height: 1080,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+    apiMocks.getCaptureTarget.mockResolvedValueOnce({ kind: 'screen', id: 2, sourceId: '99', quality: 0.75 });
+    apiMocks.destroyVirtualDisplay.mockResolvedValueOnce(undefined);
+
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    expect(wrapper.get('.sp-virtual-badge').text()).toBe('Virtual Display');
+    expect(wrapper.find('.sp-destroy-virtual').exists()).toBe(true);
+
+    await wrapper.get('.sp-destroy-virtual').trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.destroyVirtualDisplay).toHaveBeenCalledWith(99);
   });
 });

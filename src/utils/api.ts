@@ -54,6 +54,21 @@ export const api = {
   closeTrayPanel: () => invoke<void>('close_tray_panel'),
   setCaptureTarget: (args: CaptureTarget) =>
     invoke<void>('set_capture_target', { args }),
+  isVirtualDisplaySupported: () => invoke<boolean>('is_virtual_display_supported'),
+  createVirtualDisplay: (config: VirtualDisplayConfig) =>
+    invoke<number>('create_virtual_display', { config }),
+  destroyVirtualDisplay: (displayId: number) =>
+    invoke<void>('destroy_virtual_display', { displayId }),
+  destroyAllVirtualDisplays: () => invoke<void>('destroy_all_virtual_displays'),
+  getActiveVirtualDisplays: () => invoke<number[]>('get_active_virtual_displays'),
+};
+
+export type VirtualDisplayConfig = {
+  name?: string;
+  width: number;
+  height: number;
+  refreshRate?: number;
+  hiDpi?: boolean;
 };
 
 export type CaptureSourceInfo = {
@@ -65,6 +80,7 @@ export type CaptureSourceInfo = {
   preview: string | null;
   width: number;
   height: number;
+  isVirtual?: boolean;
 };
 
 export type CaptureTargetState = {

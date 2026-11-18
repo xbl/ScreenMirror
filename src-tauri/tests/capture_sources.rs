@@ -25,6 +25,7 @@ fn capture_source_info_serializes_the_source_identifier() {
         preview: None,
         width: 5120,
         height: 2880,
+        is_virtual: None,
     };
 
     let value = serde_json::to_value(source).expect("capture source serializes");

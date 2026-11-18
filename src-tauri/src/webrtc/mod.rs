@@ -27,7 +27,7 @@ pub use video_toolbox_iosurface::{
     is_available as iosurface_encoder_available, IOSurfaceEncoderError, IOSurfaceVideoEncoder,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureKind {
     Screen,
     Window,
@@ -62,6 +62,8 @@ pub struct CaptureSourceInfo {
     pub preview: Option<String>,
     pub width: u32,
     pub height: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_virtual: Option<bool>,
 }
 
 const PREVIEW_MAX_DIMENSION: u32 = 320;
@@ -270,11 +272,17 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
     {
         use xcap::{Monitor, Window};
         let mut out = Vec::new();
+        let active_virtual_ids = crate::virtual_display::get_active_ids();
         for (idx, m) in Monitor::all()
             .map_err(|e| e.to_string())?
             .into_iter()
             .enumerate()
         {
+            let is_virtual = m
+                .id()
+                .ok()
+                .map(|id| active_virtual_ids.contains(&id))
+                .unwrap_or(false);
             let source_id = m.id().map(|id| id.to_string()).map_err(|error| {
                 format!("failed to read display ID for screen {}: {error}", idx + 1)
             })?;
@@ -289,6 +297,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 is_primary: m.is_primary().unwrap_or(false),
                 width,
                 height,
+                is_virtual: if is_virtual { Some(true) } else { None },
             });
         }
         if let Ok(windows) = Window::all() {
@@ -313,6 +322,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                     preview: None,
                     width,
                     height,
+                    is_virtual: None,
                 });
                 window_index += 1;
             }
