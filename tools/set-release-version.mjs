@@ -19,8 +19,8 @@ updateJson('viewer/package-lock.json');
 
 const replaceOnce = (file, pattern, replacement) => {
   const input = fs.readFileSync(file, 'utf8');
+  if (!pattern.test(input)) throw new Error(`Version field not found in ${file}`);
   const output = input.replace(pattern, replacement);
-  if (output === input) throw new Error(`Version field not found in ${file}`);
   fs.writeFileSync(file, output);
 };
 
