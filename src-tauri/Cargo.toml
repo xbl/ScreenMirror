@@ -43,7 +43,7 @@ if-addrs = "0.7"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 xcap = "0.9"
-screencapturekit = { version = "8.0.1", features = ["macos_13_0"], optional = true }
+screencapturekit = { version = "8.0.1", features = ["macos_13_0", "macos_14_0"], optional = true }
 videotoolbox = { version = "0.18.1", optional = true, default-features = true }
 apple-cf = { version = "0.9.3", optional = true }
 

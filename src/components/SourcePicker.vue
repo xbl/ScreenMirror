@@ -113,11 +113,43 @@
     </template>
 
     <template v-else>
-      <header class="sp-head"><span id="source-picker-title" class="sp-eyebrow">{{ t('source.label') }}</span></header>
+      <header class="sp-head">
+        <span id="source-picker-title" class="sp-eyebrow">{{ t('source.label') }}</span>
+        <button
+          v-if="!selectedSource?.isVirtual"
+          class="sp-create-virtual-tray-btn"
+          type="button"
+          :disabled="creatingVirtual"
+          @click="handleCreateVirtualDisplay"
+        >
+          <span class="sp-plus-icon">+</span>
+          {{ creatingVirtual ? t('source.loading') : t('source.createVirtualDisplay') }}
+        </button>
+        <button
+          v-else
+          class="sp-destroy-virtual-tray-btn"
+          type="button"
+          @click="handleDestroySelectedVirtual"
+        >
+          {{ t('source.destroyVirtualDisplay') }}
+        </button>
+      </header>
       <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
       <div v-if="loading && !selectedSource" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
       <div v-else class="sp-current" data-testid="source-preview" aria-live="polite">
-        <div class="sp-current-preview"><img v-if="selectedSource?.preview" :src="selectedSource.preview" alt="" /><span v-else>{{ previewLoading ? t('source.previewLoading') : t('source.noPreview') }}</span></div>
+        <div class="sp-current-preview">
+          <img
+            v-if="selectedSource?.preview"
+            :src="selectedSource.preview"
+            alt=""
+            @error="onPreviewImageError"
+          />
+          <span v-else-if="previewLoading" class="sp-preview-status">{{ t('source.previewLoading') }}</span>
+          <span v-else-if="selectedSource?.kind === 'window'" class="sp-preview-window-fallback" aria-hidden="true">
+            <span class="sp-window-icon"></span>
+          </span>
+          <span v-else class="sp-preview-status">{{ t('source.noPreview') }}</span>
+        </div>
         <div class="sp-current-copy">
           <span class="sp-current-label">
             {{ t('source.current') }}
@@ -263,12 +295,19 @@ async function handleDestroySelectedVirtual() {
   }
 }
 
+function onPreviewImageError() {
+  if (selectedSource.value) {
+    selectedSource.value = { ...selectedSource.value, preview: null };
+    previewLoading.value = false;
+  }
+}
+
 function refreshPreview(source: CaptureSourceInfo, generation: number, forceRefresh: boolean, attempt = 0) {
   void api.getCaptureSourcePreview(source.sourceId, forceRefresh, source.kind).then((preview) => {
     if (generation !== refreshGeneration) return;
     if (!preview) {
       if (attempt < 3) {
-        window.setTimeout(() => refreshPreview(source, generation, false, attempt + 1), 100);
+        window.setTimeout(() => refreshPreview(source, generation, true, attempt + 1), 150);
       } else if (selectedSource.value && sourceKey(selectedSource.value) === sourceKey(source)) {
         previewLoading.value = false;
       }
@@ -315,12 +354,21 @@ async function refreshSources(forceRefresh = false) {
   try {
     const available = await api.enumerateCaptureSources();
     if (generation !== refreshGeneration) return;
-    sources.value = available;
+    const existingPreviews = new Map(
+      sources.value.filter((s) => s.preview).map((s) => [sourceKey(s), s.preview!])
+    );
+    if (selectedSource.value?.preview) {
+      existingPreviews.set(sourceKey(selectedSource.value), selectedSource.value.preview);
+    }
+    sources.value = available.map((s) => {
+      const prev = existingPreviews.get(sourceKey(s));
+      return prev ? { ...s, preview: prev } : s;
+    });
     orderedKeys.value = orderedKeys.value.filter((key) => available.some((source) => sourceKey(source) === key));
     const current = await api.getCaptureTarget().catch(() => null);
-    const restored = current && available.find((source) => source.kind === current.kind && (current.sourceId ? source.sourceId === current.sourceId : source.id === `${current.kind}:${current.id}`));
+    const restored = current && sources.value.find((source) => source.kind === current.kind && (current.sourceId ? source.sourceId === current.sourceId : source.id === `${current.kind}:${current.id}`));
     if (restored) {
-      selectedSource.value = sources.value.find((source) => sourceKey(source) === sourceKey(restored)) ?? restored;
+      selectedSource.value = restored;
       quality.value = qualityName(current.quality);
       if (selectedSource.value.preview) previewLoading.value = false;
     }
@@ -424,11 +472,19 @@ onBeforeUnmount(() => {
 .sp-cancel:hover { background: var(--accent-dim); }
 .sp-head, .sp-current, .sp-quality { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sp-eyebrow { color: var(--muted); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+.sp-create-virtual-tray-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; color: var(--accent); font-size: 11px; font-weight: 600; border: 1px dashed var(--accent); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; transition: all var(--motion-fast) ease-out; }
+.sp-create-virtual-tray-btn:hover { background: var(--accent-dim); }
+.sp-create-virtual-tray-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sp-destroy-virtual-tray-btn { display: inline-flex; align-items: center; padding: 3px 8px; color: var(--danger); font-size: 11px; font-weight: 600; border: 1px solid var(--danger-dim); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; }
+.sp-destroy-virtual-tray-btn:hover { background: var(--danger-dim); }
+.sp-plus-icon { font-size: 13px; font-weight: 700; line-height: 1; }
 .sp-loading, .sp-empty { padding: 32px 0; color: var(--muted); text-align: center; }
 .sp-error { padding: 10px; color: var(--danger); background: var(--danger-dim); }
 .sp-current { min-height: 88px; padding: 8px; border: var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
-.sp-current-preview { width: 112px; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 5px; background: var(--bg); }
+.sp-current-preview { display: grid; place-items: center; width: 112px; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 6px; background: var(--control); border: 1px solid var(--border); }
 .sp-current-preview img { width: 100%; height: 100%; object-fit: cover; }
+.sp-preview-status { padding: 4px; color: var(--muted); font-size: 11px; text-align: center; }
+.sp-preview-window-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .sp-current-copy { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
 .sp-current-label { color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .sp-current-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

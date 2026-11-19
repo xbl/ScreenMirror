@@ -158,10 +158,51 @@ fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
     )
 }
 
+fn is_visible_preview(rgba: &RgbaImage) -> bool {
+    let total = rgba.width() as u64 * rgba.height() as u64;
+    if total == 0 {
+        return false;
+    }
+    // Check if there are meaningful non-black, visible pixels.
+    // Transparent pixels (a < 30) do not count as visible.
+    // Near-black pixels (r <= 15 && g <= 15 && b <= 15) do not count as visible.
+    let threshold = (total / 100).max(20) as u32; // At least 1% visible pixels
+    let mut visible_count: u32 = 0;
+    for pixel in rgba.pixels() {
+        if pixel[3] > 30 && (pixel[0] > 15 || pixel[1] > 15 || pixel[2] > 15) {
+            visible_count += 1;
+            if visible_count >= threshold {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn composite_rgba_to_rgb(rgba: &RgbaImage, bg: [u8; 3]) -> image::RgbImage {
+    let mut rgb = image::RgbImage::new(rgba.width(), rgba.height());
+    for (src, dst) in rgba.pixels().zip(rgb.pixels_mut()) {
+        let a = src[3] as u32;
+        if a == 255 {
+            *dst = image::Rgb([src[0], src[1], src[2]]);
+        } else if a == 0 {
+            *dst = image::Rgb(bg);
+        } else {
+            let inv_a = 255 - a;
+            let r = ((src[0] as u32 * a + bg[0] as u32 * inv_a) / 255) as u8;
+            let g = ((src[1] as u32 * a + bg[1] as u32 * inv_a) / 255) as u8;
+            let b = ((src[2] as u32 * a + bg[2] as u32 * inv_a) / 255) as u8;
+            *dst = image::Rgb([r, g, b]);
+        }
+    }
+    rgb
+}
+
 fn preview_data_url(rgba: RgbaImage) -> Result<String, String> {
-    let (width, height) = preview_dimensions(rgba.width(), rgba.height());
+    let rgb = composite_rgba_to_rgb(&rgba, [255, 255, 255]);
+    let (width, height) = preview_dimensions(rgb.width(), rgb.height());
     let thumbnail =
-        image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Triangle);
+        image::imageops::resize(&rgb, width, height, image::imageops::FilterType::Triangle);
     let mut bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut bytes, PREVIEW_JPEG_QUALITY)
         .encode_image(&thumbnail)
@@ -367,14 +408,21 @@ pub fn get_capture_source_preview(
                     height,
                     force_refresh,
                     || {
+                        if window.is_minimized().unwrap_or(false) {
+                            return Err("window is minimized".into());
+                        }
                         window
                             .capture_image()
                             .map_err(|error| error.to_string())
                             .and_then(|image| {
-                                RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
+                                let rgba = RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
                                     .ok_or_else(|| {
-                                        "window preview has invalid image dimensions".into()
-                                    })
+                                        String::from("window preview has invalid image dimensions")
+                                    })?;
+                                if !is_visible_preview(&rgba) {
+                                    return Err(String::from("window preview is blank or black"));
+                                }
+                                Ok(rgba)
                             })
                     },
                 ))
