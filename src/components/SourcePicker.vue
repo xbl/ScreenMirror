@@ -99,7 +99,10 @@
             :aria-pressed="sourceKey(item) === selectedSourceKey"
             @click="selectAndClose(item)"
           >
-            <span class="sp-window-thumb" aria-hidden="true"><span class="sp-window-icon"></span></span>
+            <span class="sp-window-thumb" aria-hidden="true">
+              <img v-if="item.preview" :src="item.preview" alt="" class="sp-window-thumb-img" />
+              <span v-else class="sp-window-icon"></span>
+            </span>
             <span class="sp-window-copy"><strong>{{ item.name }}</strong><small>{{ resolution(item) }}</small></span>
             <span v-if="sourceKey(item) === selectedSourceKey" class="sp-check" aria-hidden="true">&#10003;</span>
           </button>
@@ -325,6 +328,13 @@ function refreshPreview(source: CaptureSourceInfo, generation: number, forceRefr
 function refreshPreviews(available: CaptureSourceInfo[], selected: CaptureSourceInfo | null, generation: number, forceRefresh: boolean) {
   const previewSources = available.filter((item) => item.kind === 'screen');
   if (selected?.kind === 'window') previewSources.push(selected);
+  if (props.standalone && pickerStep.value === 'windows') {
+    for (const w of available.filter((item) => item.kind === 'window')) {
+      if (!previewSources.some((s) => sourceKey(s) === sourceKey(w))) {
+        previewSources.push(w);
+      }
+    }
+  }
   for (const source of previewSources) {
     refreshPreview(source, generation, forceRefresh);
   }
@@ -419,7 +429,16 @@ onMounted(() => {
     });
   }
 });
-watch([pickerStep, orderedWindows], ([step]) => { void resizePickerWindow(step); }, { flush: 'post' });
+watch([pickerStep, orderedWindows], ([step, windows]) => {
+  void resizePickerWindow(step);
+  if (step === 'windows') {
+    for (const item of windows) {
+      if (!item.preview) {
+        refreshPreview(item, refreshGeneration, false);
+      }
+    }
+  }
+}, { flush: 'post' });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
   unlistenTrayOpened?.();
@@ -461,7 +480,8 @@ onBeforeUnmount(() => {
 .sp-window-list { display: grid; gap: 10px; min-width: 0; margin-top: 8px; }
 .sp-window-card { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; min-height: 64px; padding: 9px 12px; overflow: hidden; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--group); }
 .sp-window-card:hover, .sp-window-card.selected { border-color: var(--accent); background: var(--surface-3); }
-.sp-window-thumb { display: grid; width: 52px; height: 40px; flex: 0 0 52px; place-items: center; border-radius: 6px; background: var(--control); }
+.sp-window-thumb { position: relative; display: grid; width: 56px; height: 38px; flex: 0 0 56px; place-items: center; border-radius: 6px; overflow: hidden; background: var(--control); border: 1px solid var(--border); }
+.sp-window-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 .sp-window-icon { width: 26px; height: 19px; border: 2px solid var(--accent); border-radius: 4px; box-shadow: -5px 5px 0 -1px var(--control), -5px 5px 0 1px var(--accent); }
 .sp-window-copy { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
 .sp-window-copy strong { overflow: hidden; color: var(--text-strong); text-overflow: ellipsis; white-space: nowrap; }
