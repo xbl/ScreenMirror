@@ -25,6 +25,9 @@ void sm_virtual_display_destroy_all(void);
 /// Get the count of active virtual displays created by this process, writing up to `max_count` IDs into `out_ids`.
 uint32_t sm_virtual_display_get_active_ids(uint32_t *out_ids, uint32_t max_count);
 
+/// Check whether a display ID belongs to a destroyed or stale ScreenMirror virtual display.
+bool sm_virtual_display_is_destroyed_or_stale(uint32_t display_id);
+
 #ifdef __cplusplus
 }
 #endif

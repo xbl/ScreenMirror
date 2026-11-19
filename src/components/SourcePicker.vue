@@ -310,22 +310,34 @@ async function handleCreateVirtualDisplay() {
 
 async function handleDestroyVirtual(screen: CaptureSourceInfo) {
   const idNum = Number(screen.sourceId);
+  // Optimistically remove from local state immediately for snappy user feedback
+  sources.value = sources.value.filter((s) => sourceKey(s) !== sourceKey(screen));
+  if (selectedSource.value && sourceKey(selectedSource.value) === sourceKey(screen)) {
+    selectedSource.value = primaryScreen.value;
+  }
   if (!Number.isNaN(idNum)) {
     try {
       await api.destroyVirtualDisplay(idNum);
       await refreshSources(true);
     } catch (e) {
       error.value = String(e);
+      await refreshSources(true);
     }
   }
 }
 
 async function handleDestroyVirtualDisplays() {
+  // Optimistically remove all virtual displays immediately
+  sources.value = sources.value.filter((s) => !s.isVirtual);
+  if (selectedSource.value?.isVirtual) {
+    selectedSource.value = primaryScreen.value;
+  }
   try {
     await api.destroyAllVirtualDisplays();
     await refreshSources(true);
   } catch (e) {
     error.value = String(e);
+    await refreshSources(true);
   }
 }
 

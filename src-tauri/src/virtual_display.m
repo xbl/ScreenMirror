@@ -38,12 +38,14 @@
 @end
 
 static NSMutableDictionary<NSNumber *, CGVirtualDisplay *> *s_active_displays = nil;
+static NSMutableSet<NSNumber *> *s_destroyed_ids = nil;
 static NSLock *s_lock = nil;
 
 static void ensure_initialized(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         s_active_displays = [[NSMutableDictionary alloc] init];
+        s_destroyed_ids = [[NSMutableSet alloc] init];
         s_lock = [[NSLock alloc] init];
     });
 }
@@ -147,6 +149,7 @@ bool sm_virtual_display_destroy(uint32_t display_id) {
     ensure_initialized();
 
     [s_lock lock];
+    [s_destroyed_ids addObject:@(display_id)];
     CGVirtualDisplay *display = s_active_displays[@(display_id)];
     if (display) {
         [s_active_displays removeObjectForKey:@(display_id)];
@@ -163,6 +166,9 @@ void sm_virtual_display_destroy_all(void) {
 
     [s_lock lock];
     NSUInteger count = s_active_displays.count;
+    for (NSNumber *key in s_active_displays) {
+        [s_destroyed_ids addObject:key];
+    }
     [s_active_displays removeAllObjects];
     [s_lock unlock];
 
@@ -185,4 +191,23 @@ uint32_t sm_virtual_display_get_active_ids(uint32_t *out_ids, uint32_t max_count
     }
     [s_lock unlock];
     return count;
+}
+
+bool sm_virtual_display_is_destroyed_or_stale(uint32_t display_id) {
+    ensure_initialized();
+
+    [s_lock lock];
+    if ([s_destroyed_ids containsObject:@(display_id)]) {
+        [s_lock unlock];
+        return true;
+    }
+    BOOL is_active = (s_active_displays[@(display_id)] != nil);
+    [s_lock unlock];
+
+    if (is_active) {
+        return false;
+    }
+
+    uint32_t model = CGDisplayModelNumber((CGDirectDisplayID)display_id);
+    return (model == 0x534D);
 }

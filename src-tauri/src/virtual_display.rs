@@ -36,6 +36,7 @@ mod native {
         fn sm_virtual_display_destroy(display_id: u32) -> bool;
         fn sm_virtual_display_destroy_all();
         fn sm_virtual_display_get_active_ids(out_ids: *mut u32, max_count: u32) -> u32;
+        fn sm_virtual_display_is_destroyed_or_stale(display_id: u32) -> bool;
     }
 
     pub fn is_supported() -> bool {
@@ -88,6 +89,10 @@ mod native {
         let valid_len = (count as usize).min(16);
         ids[..valid_len].to_vec()
     }
+
+    pub fn is_destroyed_or_stale(display_id: u32) -> bool {
+        unsafe { sm_virtual_display_is_destroyed_or_stale(display_id) }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -111,6 +116,10 @@ mod native {
     pub fn get_active_ids() -> Vec<u32> {
         Vec::new()
     }
+
+    pub fn is_destroyed_or_stale(_display_id: u32) -> bool {
+        false
+    }
 }
 
 pub fn is_supported() -> bool {
@@ -131,6 +140,10 @@ pub fn destroy_all() {
 
 pub fn get_active_ids() -> Vec<u32> {
     native::get_active_ids()
+}
+
+pub fn is_destroyed_or_stale(display_id: u32) -> bool {
+    native::is_destroyed_or_stale(display_id)
 }
 
 #[cfg(test)]

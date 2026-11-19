@@ -314,32 +314,38 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
         use xcap::{Monitor, Window};
         let mut out = Vec::new();
         let active_virtual_ids = crate::virtual_display::get_active_ids();
-        for (idx, m) in Monitor::all()
+        let mut screen_index = 0;
+        for m in Monitor::all()
             .map_err(|e| e.to_string())?
             .into_iter()
-            .enumerate()
         {
-            let is_virtual = m
-                .id()
-                .ok()
-                .map(|id| active_virtual_ids.contains(&id))
+            let id = m.id().ok();
+            if let Some(id_num) = id {
+                if crate::virtual_display::is_destroyed_or_stale(id_num) {
+                    continue;
+                }
+            }
+
+            let is_virtual = id
+                .map(|id_val| active_virtual_ids.contains(&id_val))
                 .unwrap_or(false);
             let source_id = m.id().map(|id| id.to_string()).map_err(|error| {
-                format!("failed to read display ID for screen {}: {error}", idx + 1)
+                format!("failed to read display ID for screen {}: {error}", screen_index + 1)
             })?;
             let width = m.width().unwrap_or(0);
             let height = m.height().unwrap_or(0);
             out.push(CaptureSourceInfo {
-                id: legacy_capture_source_id("screen", idx),
+                id: legacy_capture_source_id("screen", screen_index),
                 preview: None,
                 source_id,
-                name: m.name().unwrap_or_else(|_| format!("Display {}", idx + 1)),
+                name: m.name().unwrap_or_else(|_| format!("Display {}", screen_index + 1)),
                 kind: "screen".into(),
                 is_primary: m.is_primary().unwrap_or(false),
                 width,
                 height,
                 is_virtual: if is_virtual { Some(true) } else { None },
             });
+            screen_index += 1;
         }
         if let Ok(windows) = Window::all() {
             let mut window_index = 0;
