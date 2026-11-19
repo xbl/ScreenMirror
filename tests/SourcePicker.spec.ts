@@ -32,7 +32,7 @@ const i18n = createI18n({
   legacy: false,
   locale: 'en',
   messages: { en: { source: {
-    label: 'Sharing source', current: 'Currently sharing', change: 'Change', chooseType: 'Choose what to share', chooseWindow: 'Choose a window or app', entireScreenDescription: 'Share the primary display', windowsDescription: 'Share one running window or app', extendedDescription: 'Use an extended display', runningWindows: 'Running windows and apps', back: 'Back', close: 'Close', cancel: 'Cancel', entireScreen: 'Entire screen', windowsAndApps: 'Window or app', extendedDisplays: 'Extended displays', createVirtualDisplay: 'New Virtual Display', createVirtualDisplayDescription: 'Create a virtual desktop', virtualDisplayBadge: 'Virtual Display', destroyVirtualDisplay: 'Remove Display', primary: 'Primary display', resolution: '{width} x {height}', refresh: 'Refresh sources', loading: 'Loading...', noSources: 'No sources', previewLoading: 'Loading preview...', noPreview: 'No preview available', quality: 'Quality', qualityBalanced: 'Balanced', qualityHigh: 'High', qualityUltra: 'Ultra', errorEnumerate: 'Could not load sources', errorSwitch: 'Could not switch',
+    label: 'Sharing source', current: 'Currently sharing', change: 'Change', chooseType: 'Choose what to share', chooseWindow: 'Choose a window or app', entireScreenDescription: 'Share the primary display', windowsDescription: 'Share one running window or app', extendedDescription: 'Use an extended display', runningWindows: 'Running windows and apps', back: 'Back', close: 'Close', cancel: 'Cancel', entireScreen: 'Entire screen', windowsAndApps: 'Window or app', extendedDisplays: 'Extended displays', createVirtualDisplay: 'New Virtual Display', createVirtualDisplayDescription: 'Create a virtual desktop', virtualDisplayBadge: 'Virtual Display', destroyVirtualDisplay: 'Remove Virtual Display', destroyAllVirtualDisplays: 'Remove All Virtual Displays', primary: 'Primary display', resolution: '{width} x {height}', refresh: 'Refresh sources', loading: 'Loading...', noSources: 'No sources', previewLoading: 'Loading preview...', noPreview: 'No preview available', quality: 'Quality', qualityBalanced: 'Balanced', qualityHigh: 'High', qualityUltra: 'Ultra', errorEnumerate: 'Could not load sources', errorSwitch: 'Could not switch',
   } } },
 });
 
@@ -292,5 +292,91 @@ describe('SourcePicker', () => {
     await flushPromises();
 
     expect(apiMocks.destroyVirtualDisplay).toHaveBeenCalledWith(99);
+  });
+
+  it('shows destroy button in tray header when virtual display exists even if sharing a window', async () => {
+    const virtualSource = {
+      id: 'screen:2',
+      sourceId: '99',
+      name: 'ScreenMirror Virtual Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1920,
+      height: 1080,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+    // Active target is window:0 (Terminal), NOT the virtual screen!
+    apiMocks.getCaptureTarget.mockResolvedValueOnce({ kind: 'window', id: 0, sourceId: 'terminal-window', quality: 0.75 });
+    apiMocks.destroyAllVirtualDisplays.mockResolvedValueOnce(undefined);
+
+    const wrapper = mountPicker();
+    await flushPromises();
+
+    // Tray header should show destroy button, NOT create button, because a virtual display exists!
+    expect(wrapper.find('.sp-destroy-virtual-tray-btn').exists()).toBe(true);
+    expect(wrapper.find('.sp-create-virtual-tray-btn').exists()).toBe(false);
+
+    await wrapper.get('.sp-destroy-virtual-tray-btn').trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.destroyAllVirtualDisplays).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows destroying individual virtual display from standalone card delete button', async () => {
+    const virtualSource = {
+      id: 'screen:2',
+      sourceId: '99',
+      name: 'ScreenMirror Virtual Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1920,
+      height: 1080,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+    apiMocks.destroyVirtualDisplay.mockResolvedValueOnce(undefined);
+
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    const deleteBtn = wrapper.find('.sp-virtual-card-delete');
+    expect(deleteBtn.exists()).toBe(true);
+
+    await deleteBtn.trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.destroyVirtualDisplay).toHaveBeenCalledWith(99);
+    // Deleting should NOT close the picker
+    expect(windowMocks.close).not.toHaveBeenCalled();
+  });
+
+  it('shows remove all button in standalone picker when virtual displays exist and allows removing all', async () => {
+    const virtualSource = {
+      id: 'screen:2',
+      sourceId: '99',
+      name: 'ScreenMirror Virtual Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1920,
+      height: 1080,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+    apiMocks.destroyAllVirtualDisplays.mockResolvedValueOnce(undefined);
+
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    const removeAllBtn = wrapper.find('.sp-destroy-all-virtual-btn');
+    expect(removeAllBtn.exists()).toBe(true);
+
+    await removeAllBtn.trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.destroyAllVirtualDisplays).toHaveBeenCalledTimes(1);
   });
 });

@@ -44,27 +44,40 @@
             </span>
           </button>
 
-          <button
+          <div
             v-for="screen in extendedScreens"
             :key="sourceKey(screen)"
-            class="sp-type-card"
-            :class="{ selected: sourceKey(screen) === selectedSourceKey }"
-            type="button"
-            data-source-type="extended"
-            @click="selectAndClose(screen)"
+            class="sp-extended-card-wrap"
           >
-            <span class="sp-type-visual sp-type-extended">
-              <img v-if="screen.preview" :src="screen.preview" alt="" />
-              <span v-else class="sp-preview-fallback">{{ t('source.previewLoading') }}</span>
-            </span>
-            <span class="sp-type-copy">
-              <strong>
-                {{ screen.isVirtual ? t('source.virtualDisplayBadge') : t('source.extendedDisplays') }}
-                <span v-if="screen.isVirtual" class="sp-virtual-badge">{{ t('source.virtualDisplayBadge') }}</span>
-              </strong>
-              <small>{{ screen.name }} · {{ t('source.extendedDescription') }}</small>
-            </span>
-          </button>
+            <button
+              class="sp-type-card"
+              :class="{ selected: sourceKey(screen) === selectedSourceKey }"
+              type="button"
+              data-source-type="extended"
+              @click="selectAndClose(screen)"
+            >
+              <span class="sp-type-visual sp-type-extended">
+                <img v-if="screen.preview" :src="screen.preview" alt="" />
+                <span v-else class="sp-preview-fallback">{{ t('source.previewLoading') }}</span>
+              </span>
+              <span class="sp-type-copy">
+                <strong>
+                  {{ screen.isVirtual ? t('source.virtualDisplayBadge') : t('source.extendedDisplays') }}
+                  <span v-if="screen.isVirtual" class="sp-virtual-badge">{{ t('source.virtualDisplayBadge') }}</span>
+                </strong>
+                <small>{{ screen.name }} · {{ t('source.extendedDescription') }}</small>
+              </span>
+            </button>
+            <button
+              v-if="screen.isVirtual"
+              class="sp-virtual-card-delete"
+              type="button"
+              :title="t('source.destroyVirtualDisplay')"
+              @click.stop="handleDestroyVirtual(screen)"
+            >
+              &#10005;
+            </button>
+          </div>
         </div>
 
         <div class="sp-virtual-section">
@@ -77,6 +90,14 @@
           >
             <span class="sp-virtual-plus" aria-hidden="true">+</span>
             <span>{{ creatingVirtual ? t('source.loading') : t('source.createVirtualDisplay') }}</span>
+          </button>
+          <button
+            v-if="hasVirtualDisplay"
+            class="sp-destroy-all-virtual-btn"
+            type="button"
+            @click="handleDestroyVirtualDisplays"
+          >
+            {{ t('source.destroyAllVirtualDisplays') }}
           </button>
         </div>
         <p v-if="!primaryScreen && !extendedScreens.length && !orderedWindows.length" class="sp-empty">{{ t('source.noSources') }}</p>
@@ -119,7 +140,15 @@
       <header class="sp-head">
         <span id="source-picker-title" class="sp-eyebrow">{{ t('source.label') }}</span>
         <button
-          v-if="!selectedSource?.isVirtual"
+          v-if="hasVirtualDisplay"
+          class="sp-destroy-virtual-tray-btn"
+          type="button"
+          @click="handleDestroyVirtualDisplays"
+        >
+          {{ t('source.destroyVirtualDisplay') }}
+        </button>
+        <button
+          v-else
           class="sp-create-virtual-tray-btn"
           type="button"
           :disabled="creatingVirtual"
@@ -127,14 +156,6 @@
         >
           <span class="sp-plus-icon">+</span>
           {{ creatingVirtual ? t('source.loading') : t('source.createVirtualDisplay') }}
-        </button>
-        <button
-          v-else
-          class="sp-destroy-virtual-tray-btn"
-          type="button"
-          @click="handleDestroySelectedVirtual"
-        >
-          {{ t('source.destroyVirtualDisplay') }}
         </button>
       </header>
       <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
@@ -208,6 +229,8 @@ const orderedScreens = computed(() => ordered.value.filter((source) => source.ki
 const primaryScreen = computed(() => orderedScreens.value.find((source) => source.isPrimary) ?? orderedScreens.value[0] ?? null);
 const extendedScreens = computed(() => orderedScreens.value.filter((source) => sourceKey(source) !== (primaryScreen.value ? sourceKey(primaryScreen.value) : '')));
 const orderedWindows = computed(() => ordered.value.filter((source) => source.kind === 'window'));
+const virtualScreens = computed(() => sources.value.filter((source) => source.isVirtual));
+const hasVirtualDisplay = computed(() => virtualScreens.value.length > 0);
 const selectedSourceKey = computed(() => selectedSource.value ? sourceKey(selectedSource.value) : null);
 
 function sourceKey(source: Pick<CaptureSourceInfo, 'kind' | 'sourceId'>) { return `${source.kind}:${source.sourceId}`; }
@@ -285,9 +308,8 @@ async function handleCreateVirtualDisplay() {
   }
 }
 
-async function handleDestroySelectedVirtual() {
-  if (!selectedSource.value?.isVirtual) return;
-  const idNum = Number(selectedSource.value.sourceId);
+async function handleDestroyVirtual(screen: CaptureSourceInfo) {
+  const idNum = Number(screen.sourceId);
   if (!Number.isNaN(idNum)) {
     try {
       await api.destroyVirtualDisplay(idNum);
@@ -296,6 +318,20 @@ async function handleDestroySelectedVirtual() {
       error.value = String(e);
     }
   }
+}
+
+async function handleDestroyVirtualDisplays() {
+  try {
+    await api.destroyAllVirtualDisplays();
+    await refreshSources(true);
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+async function handleDestroySelectedVirtual() {
+  if (!selectedSource.value?.isVirtual) return;
+  await handleDestroyVirtual(selectedSource.value);
 }
 
 function onPreviewImageError() {
@@ -511,7 +547,13 @@ onBeforeUnmount(() => {
 .sp-current-copy small { color: var(--muted); }
 .sp-quality { padding-top: 12px; border-top: var(--line); color: var(--muted); font-size: 13px; }
 .sp-quality select { min-width: 150px; padding: 8px 10px; color: var(--text); border: var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); }
-.sp-virtual-section { display: flex; justify-content: center; margin: 12px 0 4px; }
+.sp-extended-card-wrap { position: relative; display: flex; flex-direction: column; }
+.sp-extended-card-wrap .sp-type-card { width: 100%; height: 100%; flex: 1; }
+.sp-virtual-card-delete { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.65); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 50%; font-size: 11px; line-height: 1; cursor: pointer; z-index: 2; transition: background var(--motion-fast) ease-out, transform var(--motion-fast) ease-out; }
+.sp-virtual-card-delete:hover { background: var(--danger); transform: scale(1.1); }
+.sp-virtual-section { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0 4px; }
+.sp-destroy-all-virtual-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; color: var(--danger); font-size: 13px; font-weight: 600; border: 1px solid var(--danger-dim); border-radius: var(--radius-md); background: var(--control); cursor: pointer; transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out; }
+.sp-destroy-all-virtual-btn:hover { background: var(--danger-dim); }
 .sp-create-virtual-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--accent); font-size: 13px; font-weight: 600; border: 1px dashed var(--accent); border-radius: var(--radius-md); background: var(--control); cursor: pointer; transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out; }
 .sp-create-virtual-btn:hover { background: var(--accent-dim); }
 .sp-create-virtual-btn:disabled { opacity: 0.6; cursor: not-allowed; }
