@@ -28,7 +28,12 @@ export function useRemoteInput(options: RemoteInputOptions) {
   let isDragging = false;
   let lastMoveTime = 0;
 
-  // Two-finger touch scroll and pinch-zoom state
+  // Multi-touch isolation state (ensures pinch-to-zoom never affects computer windows)
+  let isMultiTouchActive = false;
+  let lastMultiTouchTime = 0;
+  let singleFingerPanStart: { clientX: number; clientY: number; initialPanX: number; initialPanY: number } | null = null;
+
+  // Zoom & Pan state (active regardless of touchControlEnabled)
   let lastTwoFingerPos: { x: number; y: number } | null = null;
   const zoomScale = ref<number>(1.0);
   const panX = ref<number>(0);
@@ -73,10 +78,16 @@ export function useRemoteInput(options: RemoteInputOptions) {
   // --- Pointer Event Handlers (Mouse & Single-Touch) ---
 
   function onPointerDown(e: PointerEvent) {
-    if (!touchControlEnabled.value) return;
+    if (e.pointerType === 'touch') {
+      // If multi-touch is active or was recently active, ignore touch pointer down completely
+      if (isMultiTouchActive || Date.now() - lastMultiTouchTime < 300) {
+        pointerDownPos = null;
+        return;
+      }
+      if (!e.isPrimary) return;
+    }
 
-    // Ignore multi-touch start here; touch events handle two-finger scroll
-    if (e.pointerType === 'touch' && !e.isPrimary) return;
+    if (!touchControlEnabled.value) return;
 
     const norm = getNormalized(e);
     if (!norm || !norm.isInside) return;
@@ -103,6 +114,8 @@ export function useRemoteInput(options: RemoteInputOptions) {
     const downNormY = norm.normY;
     longPressTimer = window.setTimeout(() => {
       longPressTimer = undefined;
+      // Double check multi-touch wasn't initiated during the delay
+      if (isMultiTouchActive || Date.now() - lastMultiTouchTime < 300) return;
       longPressTriggered = true;
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         navigator.vibrate?.(40);
@@ -118,8 +131,24 @@ export function useRemoteInput(options: RemoteInputOptions) {
   }
 
   function onPointerMove(e: PointerEvent) {
+    if (e.pointerType === 'touch') {
+      // During or immediately after multi-touch, ignore pointer movement
+      if (isMultiTouchActive || Date.now() - lastMultiTouchTime < 300) {
+        if (isDragging && pointerDownPos) {
+          isDragging = false;
+          const norm = getNormalized(pointerDownPos);
+          if (norm) {
+            sendRemoteInput({ action: 'mouse_up', x: norm.normX, y: norm.normY, button: 'left' });
+          }
+        }
+        pointerDownPos = null;
+        clearLongPress();
+        return;
+      }
+      if (!e.isPrimary) return;
+    }
+
     if (!touchControlEnabled.value) return;
-    if (e.pointerType === 'touch' && !e.isPrimary) return;
 
     const norm = getNormalized(e);
     if (!norm) return;
@@ -145,7 +174,9 @@ export function useRemoteInput(options: RemoteInputOptions) {
     // Touch movement
     if (pointerDownPos && !longPressTriggered) {
       const dist = Math.hypot(e.clientX - pointerDownPos.clientX, e.clientY - pointerDownPos.clientY);
-      if (dist > tapDistanceThresholdPx) {
+      const elapsed = now - pointerDownPos.time;
+      // Dwell check: 80ms ensures pinch gesture starting where finger 2 lands slightly late does not fire mouse_down
+      if (dist > tapDistanceThresholdPx && elapsed >= 80) {
         clearLongPress();
 
         if (!isDragging) {
@@ -177,8 +208,18 @@ export function useRemoteInput(options: RemoteInputOptions) {
   }
 
   function onPointerUp(e: PointerEvent) {
+    if (e.pointerType === 'touch') {
+      // If we just finished or are in a multi-touch gesture, DISCARD this tap completely
+      if (isMultiTouchActive || Date.now() - lastMultiTouchTime < 300) {
+        pointerDownPos = null;
+        isDragging = false;
+        clearLongPress();
+        return;
+      }
+      if (!e.isPrimary) return;
+    }
+
     if (!touchControlEnabled.value) return;
-    if (e.pointerType === 'touch' && !e.isPrimary) return;
 
     const norm = getNormalized(e);
     clearLongPress();
@@ -200,7 +241,6 @@ export function useRemoteInput(options: RemoteInputOptions) {
 
     // Touch release handling
     if (longPressTriggered) {
-      // Long press already handled as right click
       longPressTriggered = false;
       pointerDownPos = null;
       return;
@@ -276,14 +316,17 @@ export function useRemoteInput(options: RemoteInputOptions) {
     pointerDownPos = null;
   }
 
-  // --- Touch Event Handlers for Two-Finger Scroll ---
+  // --- Touch Event Handlers for Pinch-to-Zoom & View Panning ---
 
   function onTouchStart(e: TouchEvent) {
-    if (!touchControlEnabled.value) return;
-
-    if (e.touches.length === 2) {
-      // Cancel single finger gestures
+    if (e.touches.length >= 2) {
+      // Entering multi-touch gesture (Pinch & Pan)
+      isMultiTouchActive = true;
+      lastMultiTouchTime = Date.now();
       clearLongPress();
+      singleFingerPanStart = null;
+
+      // Abort any pending single-finger drag
       if (isDragging) {
         isDragging = false;
         if (pointerDownPos) {
@@ -294,6 +337,7 @@ export function useRemoteInput(options: RemoteInputOptions) {
         }
       }
       pointerDownPos = null;
+      lastTapPos = null;
 
       const t0 = e.touches[0];
       const t1 = e.touches[1];
@@ -304,13 +348,29 @@ export function useRemoteInput(options: RemoteInputOptions) {
       initialPinchScale = zoomScale.value;
       isPinching = false;
       e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length === 1) {
+      if (!touchControlEnabled.value && zoomScale.value > 1.05) {
+        // In viewer mode without touch control: single finger drags to pan the zoomed view
+        singleFingerPanStart = {
+          clientX: e.touches[0].clientX,
+          clientY: e.touches[0].clientY,
+          initialPanX: panX.value,
+          initialPanY: panY.value,
+        };
+      }
     }
   }
 
   function onTouchMove(e: TouchEvent) {
-    if (!touchControlEnabled.value) return;
+    if (e.touches.length >= 2 && lastTwoFingerPos) {
+      isMultiTouchActive = true;
+      lastMultiTouchTime = Date.now();
+      clearLongPress();
+      pointerDownPos = null;
 
-    if (e.touches.length === 2 && lastTwoFingerPos) {
       const t0 = e.touches[0];
       const t1 = e.touches[1];
       const midX = (t0.clientX + t1.clientX) / 2;
@@ -322,7 +382,7 @@ export function useRemoteInput(options: RemoteInputOptions) {
       lastTwoFingerPos = { x: midX, y: midY };
 
       const pinchRatio = initialPinchDist > 0 ? dist / initialPinchDist : 1.0;
-      if (!isPinching && Math.abs(pinchRatio - 1.0) > 0.06) {
+      if (!isPinching && Math.abs(pinchRatio - 1.0) > 0.05) {
         isPinching = true;
       }
 
@@ -335,11 +395,11 @@ export function useRemoteInput(options: RemoteInputOptions) {
           panY.value = midY - (midY - panY.value) * scaleDiff;
         }
       } else if (zoomScale.value > 1.05) {
-        // Pan the zoomed view
+        // Pan the zoomed view with two fingers
         panX.value += deltaX;
         panY.value += deltaY;
-      } else {
-        // Scroll macOS
+      } else if (touchControlEnabled.value) {
+        // Scroll macOS (only when at 1.0x full view and touch control is explicitly enabled)
         const norm = getNormalized({ clientX: midX, clientY: midY });
         if (norm) {
           sendRemoteInput({
@@ -352,11 +412,19 @@ export function useRemoteInput(options: RemoteInputOptions) {
         }
       }
       e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length === 1 && !touchControlEnabled.value && singleFingerPanStart && zoomScale.value > 1.05) {
+      const dx = e.touches[0].clientX - singleFingerPanStart.clientX;
+      const dy = e.touches[0].clientY - singleFingerPanStart.clientY;
+      panX.value = singleFingerPanStart.initialPanX + dx;
+      panY.value = singleFingerPanStart.initialPanY + dy;
+      e.preventDefault();
     }
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (!touchControlEnabled.value) return;
     if (e.touches.length < 2) {
       lastTwoFingerPos = null;
       initialPinchDist = 0;
@@ -365,14 +433,22 @@ export function useRemoteInput(options: RemoteInputOptions) {
         resetZoom();
       }
     }
+    if (isMultiTouchActive) {
+      lastMultiTouchTime = Date.now();
+      if (e.touches.length === 0) {
+        isMultiTouchActive = false;
+      }
+      pointerDownPos = null;
+      clearLongPress();
+    }
+    singleFingerPanStart = null;
   }
 
-  // --- Wheel Event Handler ---
+  // --- Wheel Event Handler (Trackpad Pinch & Mouse Wheel Zoom/Pan) ---
 
   function onWheel(e: WheelEvent) {
-    if (!touchControlEnabled.value) return;
-
-    if (e.ctrlKey) {
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom in/out via trackpad pinch or Ctrl+wheel (always active)
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
       const targetScale = Math.min(4.0, Math.max(1.0, zoomScale.value * zoomFactor));
@@ -384,6 +460,17 @@ export function useRemoteInput(options: RemoteInputOptions) {
       }
       return;
     }
+
+    if (zoomScale.value > 1.05) {
+      // Pan the zoomed view using scroll
+      panX.value -= e.deltaX;
+      panY.value -= e.deltaY;
+      e.preventDefault();
+      return;
+    }
+
+    // Only forward scroll to macOS if touchControlEnabled is true
+    if (!touchControlEnabled.value) return;
 
     const norm = getNormalized(e);
     if (!norm || !norm.isInside) return;

@@ -42,9 +42,9 @@ export default {
     exitFullscreen: 'Exit Fullscreen',
   },
   remoteControl: {
-    toggle: 'Touch Control',
-    enabled: 'Touch Control ON',
-    disabled: 'Touch Control OFF',
+    toggle: 'Remote Control',
+    enabled: 'Control ON',
+    disabled: 'Control OFF',
     hint: 'Tap to click, long press for right click, two fingers to scroll',
     keyboard: 'Keyboard',
     keyboardOpen: 'Keyboard',

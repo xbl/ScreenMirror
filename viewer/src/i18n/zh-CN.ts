@@ -42,9 +42,9 @@ export default {
     exitFullscreen: '退出全屏',
   },
   remoteControl: {
-    toggle: '触控控制',
-    enabled: '触控已开启',
-    disabled: '触控已关闭',
+    toggle: '电脑操控',
+    enabled: '操控已开启',
+    disabled: '操控已关闭',
     hint: '单指点击左键，长按右键，双指滑动滚动',
     keyboard: '键盘',
     keyboardOpen: '键盘',

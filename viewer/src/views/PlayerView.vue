@@ -65,7 +65,7 @@
       >
         <span class="btn-icon touch-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-            <path d="M9 11.24V7.5a2.5 2.5 0 0 1 5 0v3.74c1.21-.81 2-2.18 2-3.74a4.5 4.5 0 0 0-9 0c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26A2 2 0 0 0 13.4 13.5H13v-6a1.5 1.5 0 0 0-3 0v10.74l-3.44-.72a1.5 1.5 0 0 0-1.54.49l-.78.89 4.93 4.93c.53.53 1.25.83 2 .83h6.24c1.47 0 2.71-1.07 2.95-2.53l.63-3.79a3 3 0 0 0-2.15-3.41z" />
+            <path d="M3 3l7 17 2.5-6.5L19 11 3 3z" />
           </svg>
         </span>
         <span class="btn-label touch-label">{{ touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled') }}</span>
@@ -773,10 +773,10 @@ onBeforeUnmount(() => {
   object-fit: contain;
   background: var(--canvas);
   cursor: pointer;
+  touch-action: none;
 }
 
 .frame.touch-control-active {
-  touch-action: none;
   cursor: crosshair;
 }
 
