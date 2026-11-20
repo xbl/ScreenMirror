@@ -121,6 +121,21 @@ screenmirror/
   previews use separate cache keys; never show a display preview for a window
   source. During a pending request, show `source.previewLoading`; use
   `source.noPreview` only after the bounded capture attempt has failed.
+- Window thumbnail captures (especially from Electron, Chromium, Terminal, Feishu)
+  frequently contain an alpha channel. Thumbnail generation must composite
+  RGBA pixels against an opaque background canvas (e.g. `#1e222b`) before
+  encoding to JPEG; stripping alpha directly creates pitch-black images.
+  Guard thumbnails with `is_visible_preview` to detect all-black frames and fall
+  back to icons.
+- System resource lifecycle must be strictly decoupled from the active share target:
+  macOS virtual displays are system-level hardware displays. UI controls for
+  creating or destroying virtual displays must be driven by global resource
+  existence (`hasVirtualDisplay`), NEVER by `selectedSource?.isVirtual`. Users
+  must be able to remove created virtual screens regardless of whether they are
+  currently sharing the virtual screen, the primary display, or an app window.
+- When destroying system resources (such as virtual displays), the frontend must
+  optimistically update its local reactive state immediately (0ms visual feedback)
+  rather than waiting for an IPC round-trip to re-enumerate sources.
 - A source-selection change is verified with a real Tauri flow: open the tray,
   select an App, confirm the target name and preview change in the tray card,
   then switch back to the primary display. Vue tests alone do not cover the
@@ -156,6 +171,33 @@ screenmirror/
 - LAN Interface Priority: Virtual interfaces (`utun*`, `bridge*`, `tun*`, `tap*`,
   `vbox*`) must be filtered out when binding/publishing signaling endpoints and
   SDP candidates. Always bind to physical private LAN IPv4 interfaces (`en0`, `en1`).
+
+### macOS Virtual Displays (CGVirtualDisplay) & Lifecycle
+
+- **WindowServer Asynchronous Teardown & Tombstoning**:
+  macOS WindowServer deregisters displays (`CGVirtualDisplay`) asynchronously.
+  Releasing the Objective-C object or calling `sm_virtual_display_destroy`
+  returns immediately, but `CGGetActiveDisplayList` / `xcap::Monitor::all()` may
+  still report the display for tens to hundreds of milliseconds.
+  - The backend must track destroyed display IDs (`s_destroyed_ids`) and filter
+    them out inside `enumerate_sources()`.
+  - Feature-code filter: ScreenMirror virtual displays use product ID `0x534D`
+    (decimal 21325, displayed as `Display #21325`). Any monitor with model number
+    `0x534D` that is NOT actively registered in `s_active_displays` is an
+    asynchronously terminating or orphaned phantom display. It must NEVER be
+    returned as a physical "扩展显示器" (Extended Display); doing so causes
+    destroyed cards to resurrect without their delete buttons.
+- **Optimistic UI Updates for Hardware Destruction**:
+  Frontend destruction actions (such as clicking `✕` on a virtual screen card)
+  must optimistically remove the target from local reactive state (`sources.value`)
+  immediately to provide 0ms visual feedback, rather than waiting for an IPC
+  round-trip to re-enumerate sources and racing OS deregistration.
+- **The Mode Change Trap**:
+  Never change the display mode of a `CGVirtualDisplay` after creation via
+  `CGDisplaySetDisplayMode`. CoreGraphics has an internal bug where mode-altered
+  virtual displays are never reclaimed by WindowServer upon object deallocation,
+  permanently leaking the virtual monitor until the host process completely exits.
+  Always instantiate the display with its desired final resolution directly.
 
 ### PlayerView.vue — fragile, read before editing
 
@@ -368,3 +410,11 @@ in that order. Spec → plan → brief form a contract chain.
   to let `rustc` catch dead code).
 - Staging changes with `git add .` or `git add -A` (stage explicitly by path).
 - Committing `viewer/` changes without rebuilding `viewer/dist/`.
+- Assuming OS-level resource destruction (such as `CGVirtualDisplay`) is
+  synchronously reflected in display enumeration (`Monitor::all()`).
+- Returning a ScreenMirror virtual display (`productID == 0x534D` / `Display #21325`)
+  as a physical extended monitor when it is not in the active registry.
+- Modifying the display mode of a `CGVirtualDisplay` after creation via
+  `CGDisplaySetDisplayMode` (causes permanent leak in WindowServer).
+- Tying system-level hardware resource creation or destruction UI strictly to the
+  currently selected share target (`selectedSource?.isVirtual`).
