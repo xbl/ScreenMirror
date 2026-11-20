@@ -344,10 +344,18 @@ function attachStream(stream: MediaStream) {
   }
   if (v.srcObject !== stream) {
     v.srcObject = stream;
+    v.muted = isAudioMuted.value;
+    v.defaultMuted = isAudioMuted.value;
     const playPromise = v.play();
     if (playPromise && typeof playPromise.then === 'function') {
       playPromise.catch((err) => {
         console.error('[player-view] play() rejected:', err);
+        // On iOS Safari, force muted play to bypass strict autoplay policies
+        if (!v.muted) {
+          v.muted = true;
+          isAudioMuted.value = true;
+          void v.play().catch(() => {});
+        }
       });
     }
     startFrameWatchdog();
