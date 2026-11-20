@@ -6,11 +6,13 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { getViewerMetadata } from '../lib/signaling';
 import { useViewerStream } from '../lib/viewerStream';
+import { useRemoteControl } from '../lib/remoteControl';
 
 const props = defineProps<{ ws: WebSocket | null; roomId: string }>();
 const emit = defineEmits<{ (e: 'ready'): void }>();
 
 const { setActiveStream, setPeerConnection } = useViewerStream();
+const { setControlChannel, setFallbackWs } = useRemoteControl();
 
 const pc = ref<RTCPeerConnection | null>(null);
 let started = false;
@@ -48,6 +50,16 @@ async function startNegotiation() {
   // Expose PC in both the reactive stream store and global window for tests/diagnostics
   setPeerConnection(pc.value);
   (window as unknown as { __smPc?: RTCPeerConnection }).__smPc = pc.value;
+
+  // Establish WebRTC DataChannel for low-latency remote control
+  setFallbackWs(props.ws);
+  try {
+    const dc = pc.value.createDataChannel('screenmirror-control', { ordered: true });
+    setControlChannel(dc);
+  } catch (err) {
+    console.warn('[early-offer] failed to create control data channel:', err);
+  }
+
   pc.value.addTransceiver('video', { direction: 'recvonly' });
   pc.value.ontrack = (event) => {
     // Keep both receive-side delay knobs at zero for this interactive LAN

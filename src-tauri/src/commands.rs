@@ -55,6 +55,35 @@ pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn check_accessibility_permission() -> bool {
+    permissions::check_accessibility_permission()
+}
+
+#[tauri::command]
+pub fn request_accessibility_permission() -> bool {
+    permissions::request_accessibility_permission()
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    permissions::open_accessibility_settings()
+}
+
+#[tauri::command]
+pub fn request_and_open_accessibility_settings() -> Result<(), String> {
+    permissions::request_and_open_accessibility_settings()
+}
+
+#[tauri::command]
+pub fn inject_remote_input(
+    state: State<'_, CommandState>,
+    event: crate::input::RemoteInputEvent,
+) -> Result<(), String> {
+    let target = state.capture_target.lock().clone();
+    crate::input::inject_remote_input(&event, target.as_ref())
+}
+
+#[tauri::command]
 pub fn get_port(state: State<'_, CommandState>) -> u16 {
     *state.port.lock()
 }

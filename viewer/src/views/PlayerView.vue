@@ -4,6 +4,7 @@
       v-if="status === 'streaming'"
       ref="videoEl"
       class="frame"
+      :class="{ 'touch-control-active': touchControlEnabled }"
       autoplay
       playsinline
       muted
@@ -11,7 +12,7 @@
       @loadedmetadata="onLoadedMetadata"
       @error="onVideoError"
       @pause="onVideoPause"
-      @dblclick="toggleFullscreen"
+      @dblclick="onVideoDblClick"
     />
 
     <canvas
@@ -31,6 +32,22 @@
       <span class="player-status-dot" aria-hidden="true" />
       {{ t('player.streaming') }}
     </div>
+
+    <button
+      v-if="status === 'streaming'"
+      type="button"
+      class="player-touch-toggle"
+      :class="{ 'is-active': touchControlEnabled }"
+      :title="touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled')"
+      @click="toggleTouchControl"
+    >
+      <span class="touch-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M9 11.24V7.5a2.5 2.5 0 0 1 5 0v3.74c1.21-.81 2-2.18 2-3.74a4.5 4.5 0 0 0-9 0c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26A2 2 0 0 0 13.4 13.5H13v-6a1.5 1.5 0 0 0-3 0v10.74l-3.44-.72a1.5 1.5 0 0 0-1.54.49l-.78.89 4.93 4.93c.53.53 1.25.83 2 .83h6.24c1.47 0 2.71-1.07 2.95-2.53l.63-3.79a3 3 0 0 0-2.15-3.41z" />
+        </svg>
+      </span>
+      <span class="touch-label">{{ touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled') }}</span>
+    </button>
 
     <div v-if="status !== 'streaming'" class="player-center">
       <div v-if="noFrames" class="player-disconnected" role="alert">
@@ -70,13 +87,17 @@ import { useI18n } from 'vue-i18n';
 import { useViewerStatus } from '../lib/viewerStatus';
 import { useViewerStream } from '../lib/viewerStream';
 import { isWebCodecsSupported, WebCodecsRenderer } from '../lib/webcodecsRenderer';
+import { useRemoteControl } from '../lib/remoteControl';
+import { useRemoteInput } from '../lib/useRemoteInput';
 
 const { t } = useI18n();
 const { status, markStreaming, markDisconnected, reset } = useViewerStatus();
 const { activeStream, peerConnection, setActiveStream } = useViewerStream();
+const { touchControlEnabled, toggleTouchControl } = useRemoteControl();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
+useRemoteInput({ videoEl, canvasEl });
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
 const isUsingWebCodecs = ref(false);
@@ -269,6 +290,12 @@ function toggleFullscreen() {
     void document.documentElement.requestFullscreen?.().catch(() => {});
   } else {
     void document.exitFullscreen?.().catch(() => {});
+  }
+}
+
+function onVideoDblClick() {
+  if (!touchControlEnabled.value) {
+    toggleFullscreen();
   }
 }
 
@@ -508,6 +535,47 @@ onBeforeUnmount(() => {
   object-fit: contain;
   background: var(--canvas);
   cursor: pointer;
+}
+
+.frame.touch-control-active {
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.player-touch-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(16px);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--motion-fast) ease-out;
+  user-select: none;
+  z-index: 10;
+}
+
+.player-touch-toggle:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.player-touch-toggle.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.player-touch-toggle.is-active:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
 }
 
 .webcodecs-canvas {

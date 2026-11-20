@@ -35,4 +35,10 @@ export default {
     reconnect: '重新连接',
     noFrames: '没有画面 — 重新连接?',
   },
+  remoteControl: {
+    toggle: '触控控制',
+    enabled: '触控已开启',
+    disabled: '触控已关闭',
+    hint: '单指点击左键，长按右键，双指滑动滚动',
+  },
 };

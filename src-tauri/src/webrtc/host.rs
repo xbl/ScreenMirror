@@ -965,6 +965,27 @@ async fn drain_rtc(
                 );
                 shared_capture.request_keyframe();
             }
+            Ok(Output::Event(Event::ChannelOpen(channel_id, label))) => {
+                tracing::info!("host: DataChannel opened: id={:?} label={}", channel_id, label);
+            }
+            Ok(Output::Event(Event::ChannelData(data))) => {
+                if let Ok(text) = std::str::from_utf8(&data.data) {
+                    match crate::input::parse_remote_input(text) {
+                        Ok(event) => {
+                            let target = peer_for_subscription.active_target.lock().clone();
+                            if let Err(err) = crate::input::inject_remote_input(&event, target.as_ref()) {
+                                tracing::debug!("failed to inject remote input from DataChannel: {err}");
+                            }
+                        }
+                        Err(err) => {
+                            tracing::debug!("invalid remote input on DataChannel: {err}");
+                        }
+                    }
+                }
+            }
+            Ok(Output::Event(Event::ChannelClose(channel_id))) => {
+                tracing::info!("host: DataChannel closed: id={:?}", channel_id);
+            }
             Ok(Output::Event(_)) => {}
             Err(RtcError::Ice(_)) => {
                 tracing::info!("host: str0m ICE closed/error");

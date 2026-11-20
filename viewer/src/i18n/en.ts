@@ -35,6 +35,12 @@ export default {
     reconnect: 'Reconnect',
     noFrames: 'No video — reconnect?',
   },
+  remoteControl: {
+    toggle: 'Touch Control',
+    enabled: 'Touch Control ON',
+    disabled: 'Touch Control OFF',
+    hint: 'Tap to click, long press for right click, two fingers to scroll',
+  },
 };
 
 export type Messages = typeof import('./en').default;

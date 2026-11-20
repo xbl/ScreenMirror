@@ -65,6 +65,47 @@ pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
     open_screen_recording_settings()
 }
 
+#[cfg(target_os = "macos")]
+pub fn check_accessibility_permission() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(target_os = "macos")]
+pub fn request_accessibility_permission() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
+    }
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    let key = CFString::new("AXTrustedCheckOptionPrompt");
+    let value = CFBoolean::true_value();
+    let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const std::ffi::c_void) }
+}
+
+#[cfg(target_os = "macos")]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map(|_| ())
+        .map_err(|e| format!("failed to launch System Settings: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+pub fn request_and_open_accessibility_settings() -> Result<(), String> {
+    let _ = request_accessibility_permission();
+    open_accessibility_settings()
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn check_screen_recording_permission() -> bool {
     true
@@ -82,5 +123,25 @@ pub fn open_screen_recording_settings() -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn check_accessibility_permission() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_accessibility_permission() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_and_open_accessibility_settings() -> Result<(), String> {
     Ok(())
 }

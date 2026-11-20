@@ -486,6 +486,19 @@ async fn handle_socket(
                         "ICE_CANDIDATE" => {
                             tracing::debug!("received trickle ICE candidate; candidates are gathered in the SDP offer");
                         }
+                        "REMOTE_INPUT" => {
+                            let event_opt = serde_json::from_value::<crate::input::RemoteInputEvent>(parsed.payload.clone())
+                                .ok()
+                                .or_else(|| {
+                                    crate::input::parse_remote_input(&parsed.payload.to_string()).ok()
+                                });
+                            if let Some(event) = event_opt {
+                                let target = state.capture_target.lock().clone();
+                                if let Err(err) = crate::input::inject_remote_input(&event, target.as_ref()) {
+                                    tracing::debug!("failed to inject remote input from WebSocket: {err}");
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }

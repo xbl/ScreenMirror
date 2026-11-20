@@ -106,6 +106,7 @@ fn update_tray_for_count<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, count: usi
 
 pub mod commands;
 pub mod icons;
+pub(crate) mod input;
 pub mod network;
 pub mod permissions;
 pub mod signaling;
@@ -222,6 +223,7 @@ pub fn run() {
         .manage(command_state)
         .manage(cli_ip_state)
         .invoke_handler(tauri::generate_handler![
+            commands::check_accessibility_permission,
             commands::check_screen_recording_permission,
             commands::check_wifi_connection,
             commands::close_source_picker_window,
@@ -243,12 +245,16 @@ pub fn run() {
             commands::get_pending_device,
             commands::get_port,
             commands::get_waiting_source_id,
+            commands::inject_remote_input,
             commands::is_viewer_slot_available,
             commands::is_virtual_display_supported,
+            commands::open_accessibility_settings,
             commands::open_external_link,
             commands::open_screen_recording_settings,
             commands::open_source_picker_window,
             commands::relaunch_app,
+            commands::request_accessibility_permission,
+            commands::request_and_open_accessibility_settings,
             commands::request_and_open_screen_recording_settings,
             commands::request_screen_recording_permission,
             commands::reset_waiting_session,

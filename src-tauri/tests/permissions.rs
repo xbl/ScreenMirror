@@ -1,5 +1,6 @@
 use screenmirror_lib::permissions::{
-    check_screen_recording_permission, request_screen_recording_permission,
+    check_accessibility_permission, check_screen_recording_permission,
+    request_accessibility_permission, request_screen_recording_permission,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -13,6 +14,16 @@ fn check_returns_bool() {
 #[test]
 fn request_returns_bool() {
     let _: bool = request_screen_recording_permission();
+}
+
+#[test]
+fn accessibility_check_returns_bool() {
+    let _: bool = check_accessibility_permission();
+}
+
+#[test]
+fn accessibility_request_returns_bool() {
+    let _: bool = request_accessibility_permission();
 }
 
 #[test]
