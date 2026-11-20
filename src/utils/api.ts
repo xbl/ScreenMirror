@@ -25,6 +25,7 @@ export const api = {
   checkScreenRecordingPermission: () => invoke<boolean>('check_screen_recording_permission'),
   requestScreenRecordingPermission: () => invoke<boolean>('request_screen_recording_permission'),
   openScreenRecordingSettings: () => invoke<void>('open_screen_recording_settings'),
+  requestAndOpenScreenRecordingSettings: () => invoke<void>('request_and_open_screen_recording_settings'),
   getPort: () => invoke<number>('get_port'),
   getAppLanguage: () => invoke<string>('get_app_language'),
   setAppLanguage: (lang: string) => invoke<void>('set_app_language', { lang }),

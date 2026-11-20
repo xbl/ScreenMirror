@@ -22,6 +22,19 @@
       </div>
     </header>
 
+    <div v-if="!permissionGranted" class="tray-permission-banner" role="alert">
+      <div class="tray-perm-badge">
+        <span class="tray-perm-icon" aria-hidden="true">⚠️</span>
+        <div class="tray-perm-text">
+          <strong>{{ t('permission.bannerTitle') }}</strong>
+          <p>{{ t('permission.bannerDesc') }}</p>
+        </div>
+      </div>
+      <button class="tray-perm-btn" type="button" @click="showPermissionGuide = true">
+        {{ t('permission.grantAction') }}
+      </button>
+    </div>
+
     <QRCard class="tray-qr" />
     <SourcePicker class="tray-source" external-chooser />
 
@@ -43,24 +56,42 @@
       @close="showSettings = false"
       @reset="onReset"
     />
+    <PermissionGuideModal
+      :open="showPermissionGuide"
+      @close="showPermissionGuide = false"
+      @granted="checkPermission"
+    />
   </main>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import QRCard from './QRCard.vue';
 import SourcePicker from './SourcePicker.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
+import PermissionGuideModal from './PermissionGuideModal.vue';
 import { api } from '../utils/api';
 import logoUrl from '../../src-tauri/icons/icon.png';
 
 const { t } = useI18n();
 const showDevices = ref(false);
 const showSettings = ref(false);
+const showPermissionGuide = ref(false);
+const permissionGranted = ref(true);
 const viewerCount = ref(0);
 let poll: number | undefined;
+let unlistenTray: UnlistenFn | undefined;
+
+async function checkPermission() {
+  try {
+    permissionGranted.value = await api.checkScreenRecordingPermission();
+  } catch {
+    /* best effort */
+  }
+}
 
 async function refreshState() {
   try {
@@ -72,6 +103,7 @@ async function refreshState() {
 
 async function onReset() {
   viewerCount.value = 0;
+  void checkPermission();
 }
 
 async function exitApp() {
@@ -80,11 +112,18 @@ async function exitApp() {
 
 onMounted(() => {
   void refreshState();
+  void checkPermission();
   poll = window.setInterval(refreshState, 2000);
+  void listen('tray-panel-opened', () => {
+    void checkPermission();
+  }).then((unlisten) => {
+    unlistenTray = unlisten;
+  });
 });
 
 onBeforeUnmount(() => {
   if (poll) clearInterval(poll);
+  if (unlistenTray) unlistenTray();
 });
 </script>
 
@@ -219,8 +258,67 @@ onBeforeUnmount(() => {
   margin-top: 12px;
 }
 
-.tray-controls,
-.tray-permission {
+.tray-permission-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--warn, #e08b38) 35%, transparent);
+  background: color-mix(in srgb, var(--warn, #e08b38) 10%, var(--surface));
+}
+
+.tray-perm-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tray-perm-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tray-perm-text {
+  min-width: 0;
+}
+
+.tray-perm-text strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.3;
+}
+
+.tray-perm-text p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.tray-perm-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--warn, #e08b38);
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: opacity .15s ease;
+}
+
+.tray-perm-btn:hover {
+  opacity: .9;
+}
+
+.tray-controls {
   margin-top: 12px;
   padding-top: 12px;
   border-top: var(--line);
@@ -257,54 +355,12 @@ onBeforeUnmount(() => {
   background: var(--control);
 }
 
-.tray-action:hover,
-.tray-text-action:hover {
+.tray-action:hover {
   color: var(--text-strong);
   border-color: var(--accent);
 }
 
 .tray-exit:hover { color: #fff; border-color: var(--danger); background: var(--danger); }
-
-.tray-permission {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.tray-section-label {
-  display: block;
-  color: var(--muted);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
-
-.tray-permission strong {
-  display: block;
-  margin-top: 3px;
-  color: var(--warn);
-  font-size: 12px;
-}
-
-.tray-permission[data-ok='true'] strong {
-  color: var(--accent);
-}
-
-.tray-permission-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-}
-
-.tray-text-action {
-  padding: 2px 0;
-  color: var(--muted);
-  font-size: 11px;
-  border: 0;
-  background: transparent;
-}
 
 :deep(.source-picker) {
   padding: 14px;

@@ -29,6 +29,9 @@
     "resources": {
       "../viewer/dist/": "viewer/dist/"
     },
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "category": "Utility"
   }
 }

@@ -47,6 +47,11 @@
         </footer>
       </aside>
     </div>
+    <PermissionGuideModal
+      :open="showPermissionGuide"
+      @close="showPermissionGuide = false"
+      @granted="checkPermission"
+    />
   </Teleport>
 
 </template>
@@ -55,6 +60,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import LanguageSelector from './LanguageSelector.vue';
+import PermissionGuideModal from './PermissionGuideModal.vue';
 import { api } from '../utils/api';
 
 const props = defineProps<{ open: boolean }>();
@@ -66,6 +72,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const version = ref('');
 const permissionGranted = ref(false);
+const showPermissionGuide = ref(false);
 
 onMounted(async () => {
   try {
@@ -95,7 +102,11 @@ async function checkPermission() {
 }
 
 async function openPermissionSettings() {
-  await api.openScreenRecordingSettings();
+  if (!permissionGranted.value) {
+    showPermissionGuide.value = true;
+  } else {
+    await api.requestAndOpenScreenRecordingSettings();
+  }
 }
 
 async function openProjectHomepage() {

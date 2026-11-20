@@ -50,6 +50,11 @@ pub fn open_screen_recording_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
+    permissions::request_and_open_screen_recording_settings()
+}
+
+#[tauri::command]
 pub fn get_port(state: State<'_, CommandState>) -> u16 {
     *state.port.lock()
 }

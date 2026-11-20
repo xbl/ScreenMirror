@@ -68,11 +68,15 @@ jobs:
 
           rm -f src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           version="${RELEASE_TAG#v}"
+          dmg_staging="$(mktemp -d)"
+          cp -R "$app_path" "$dmg_staging/"
+          ln -s /Applications "$dmg_staging/Applications"
           hdiutil create \
-            -volname "ScreenMirror ${version}" \
-            -srcfolder "$app_path" \
+            -volname "ScreenMirror" \
+            -srcfolder "$dmg_staging" \
             -ov -format UDZO \
             "src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/ScreenMirror_${version}_aarch64.dmg"
+          rm -rf "$dmg_staging"
 
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" \

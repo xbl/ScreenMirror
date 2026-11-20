@@ -9,5 +9,6 @@ describe('api', () => {
     expect(typeof api.resetWaitingSession).toBe('function');
     expect(typeof api.startSharing).toBe('function');
     expect(typeof api.checkScreenRecordingPermission).toBe('function');
+    expect(typeof api.requestAndOpenScreenRecordingSettings).toBe('function');
   });
 });

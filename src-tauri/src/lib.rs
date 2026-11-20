@@ -249,6 +249,7 @@ pub fn run() {
             commands::open_screen_recording_settings,
             commands::open_source_picker_window,
             commands::relaunch_app,
+            commands::request_and_open_screen_recording_settings,
             commands::request_screen_recording_permission,
             commands::reset_waiting_session,
             commands::set_app_language,

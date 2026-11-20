@@ -10,7 +10,12 @@
         <h1 id="source-picker-title">{{ pickerStep === 'types' ? t('source.chooseType') : t('source.chooseWindow') }}</h1>
       </header>
 
-      <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
+      <div v-if="error" class="sp-error" role="alert">
+        <span>{{ error }}</span>
+        <button v-if="error === t('source.errorPermission')" class="sp-perm-btn" type="button" @click="handleOpenPermission">
+          {{ t('permission.grantAction') }}
+        </button>
+      </div>
       <div v-if="loading && !sources.length" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
 
       <template v-else-if="pickerStep === 'types'">
@@ -158,7 +163,12 @@
           {{ creatingVirtual ? t('source.loading') : t('source.createVirtualDisplay') }}
         </button>
       </header>
-      <p v-if="error" class="sp-error" role="alert">{{ error }}</p>
+      <div v-if="error" class="sp-error" role="alert">
+        <span>{{ error }}</span>
+        <button v-if="error === t('source.errorPermission')" class="sp-perm-btn" type="button" @click="handleOpenPermission">
+          {{ t('permission.grantAction') }}
+        </button>
+      </div>
       <div v-if="loading && !selectedSource" class="sp-loading" aria-live="polite">{{ t('source.loading') }}</div>
       <div v-else class="sp-current" data-testid="source-preview" aria-live="polite">
         <div class="sp-current-preview">
@@ -436,10 +446,17 @@ async function refreshSources(forceRefresh = false) {
     }
     refreshPreviews(available, selectedSource.value, generation, forceRefresh);
   } catch {
-    if (generation === refreshGeneration) error.value = t('source.errorEnumerate');
+    if (generation === refreshGeneration) {
+      const hasPerm = await api.checkScreenRecordingPermission().catch(() => true);
+      error.value = hasPerm ? t('source.errorEnumerate') : t('source.errorPermission');
+    }
   } finally {
     if (generation === refreshGeneration) loading.value = false;
   }
+}
+
+async function handleOpenPermission() {
+  await api.requestAndOpenScreenRecordingSettings();
 }
 async function changeQuality(event: Event) {
   const next = (event.target as HTMLSelectElement).value as Quality;
@@ -547,7 +564,9 @@ onBeforeUnmount(() => {
 .sp-destroy-virtual-tray-btn:hover { background: var(--danger-dim); }
 .sp-plus-icon { font-size: 13px; font-weight: 700; line-height: 1; }
 .sp-loading, .sp-empty { padding: 32px 0; color: var(--muted); text-align: center; }
-.sp-error { padding: 10px; color: var(--danger); background: var(--danger-dim); }
+.sp-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; color: var(--danger); background: var(--danger-dim); border-radius: var(--radius-sm); font-size: 12px; }
+.sp-perm-btn { padding: 4px 8px; font-size: 11px; font-weight: 600; color: #fff; background: var(--warn, #e08b38); border: none; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.sp-perm-btn:hover { opacity: .9; }
 .sp-current { min-height: 88px; padding: 8px; border: var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .sp-current-preview { display: grid; place-items: center; width: 112px; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 6px; background: var(--control); border: 1px solid var(--border); }
 .sp-current-preview img { width: 100%; height: 100%; object-fit: cover; }

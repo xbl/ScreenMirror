@@ -392,6 +392,10 @@ pub fn get_capture_source_preview(
 ) -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
+        if !crate::permissions::check_screen_recording_permission() {
+            return Ok(None);
+        }
+
         use xcap::{Monitor, Window};
 
         match source_kind {

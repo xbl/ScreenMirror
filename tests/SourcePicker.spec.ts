@@ -14,6 +14,8 @@ const apiMocks = vi.hoisted(() => ({
   destroyAllVirtualDisplays: vi.fn(),
   getActiveVirtualDisplays: vi.fn(),
   isVirtualDisplaySupported: vi.fn(),
+  checkScreenRecordingPermission: vi.fn().mockResolvedValue(true),
+  requestAndOpenScreenRecordingSettings: vi.fn().mockResolvedValue(undefined),
 }));
 const windowMocks = vi.hoisted(() => ({ close: vi.fn() }));
 const eventMocks = vi.hoisted(() => ({ listen: vi.fn() }));

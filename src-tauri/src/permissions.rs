@@ -30,6 +30,13 @@ pub fn open_screen_recording_settings() -> Result<(), String> {
         .map_err(|e| format!("failed to launch System Settings: {e}"))
 }
 
+#[cfg(target_os = "macos")]
+pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
+    // Trigger system dialog and ensure the app is registered in macOS TCC database
+    let _ = request_screen_recording_permission();
+    open_screen_recording_settings()
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn check_screen_recording_permission() -> bool {
     true
@@ -42,5 +49,10 @@ pub fn request_screen_recording_permission() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub fn open_screen_recording_settings() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_and_open_screen_recording_settings() -> Result<(), String> {
     Ok(())
 }
