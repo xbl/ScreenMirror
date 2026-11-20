@@ -151,6 +151,22 @@ screenmirror/
   `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`
   via `std::process::Command::new("open")`. Do **not** route through
   `tauri-plugin-opener` — it can reject the private scheme.
+- **macOS 15 (Sequoia) Preflight False-Negative Trap & TCC Fallback**:
+  On macOS 15+ Sequoia with ad-hoc signed binaries (`codesign --sign -`),
+  `CGPreflightScreenCaptureAccess()` has a known OS-level bug returning `false`
+  even when the user has explicitly enabled screen recording in System Settings.
+  Never rely on `CGPreflightScreenCaptureAccess()` alone. Always pair it with an
+  authoritative runtime window-inspection fallback (`xcap::Window::all()` verifying
+  non-empty cross-process window titles or app names, which macOS TCC strips when
+  denied).
+- **TCC List Registration**: Before opening System Settings, always invoke
+  `CGRequestScreenCaptureAccess()` (`request_and_open_screen_recording_settings`).
+  Opening settings without this nudge leaves the app absent from the macOS
+  "Screen & System Audio Recording" list, leaving the user with nothing to toggle.
+- **DMG Application Drag Guide**: The DMG bundle must configure an `/Applications`
+  symlink (`app_drop_link_path: "/Applications"`) so users dragging the `.app`
+  install into `/Applications` rather than running from temporary / Translocation
+  directories, avoiding quarantine and TCC bundle ID mismatches.
 - New Tauri commands go in `commands.rs`, registered in `lib.rs`'s
   `tauri::generate_handler!` macro (alphabetical order).
 - Cross-platform code uses `#[cfg(target_os = "macos")]` and a paired
@@ -414,6 +430,8 @@ in that order. Spec → plan → brief form a contract chain.
   synchronously reflected in display enumeration (`Monitor::all()`).
 - Returning a ScreenMirror virtual display (`productID == 0x534D` / `Display #21325`)
   as a physical extended monitor when it is not in the active registry.
+- Relying solely on `CGPreflightScreenCaptureAccess` without runtime window inspection fallback on macOS Sequoia (causes false "permission not granted" persistent lockouts).
+- Directing users to macOS System Settings Screen Recording without first calling `CGRequestScreenCaptureAccess` to register the app in the TCC list.
 - Modifying the display mode of a `CGVirtualDisplay` after creation via
   `CGDisplaySetDisplayMode` (causes permanent leak in WindowServer).
 - Tying system-level hardware resource creation or destruction UI strictly to the
