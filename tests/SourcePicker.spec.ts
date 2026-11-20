@@ -14,6 +14,7 @@ const apiMocks = vi.hoisted(() => ({
   destroyAllVirtualDisplays: vi.fn(),
   getActiveVirtualDisplays: vi.fn(),
   isVirtualDisplaySupported: vi.fn(),
+  getConnectedDevices: vi.fn().mockResolvedValue([]),
   checkScreenRecordingPermission: vi.fn().mockResolvedValue(true),
   requestAndOpenScreenRecordingSettings: vi.fn().mockResolvedValue(undefined),
 }));
@@ -55,6 +56,7 @@ describe('SourcePicker', () => {
     apiMocks.getCaptureTarget.mockResolvedValue({ kind: 'screen', id: 0, sourceId: 'main-display', quality: 0.75 });
     apiMocks.setCaptureTarget.mockResolvedValue(undefined);
     apiMocks.startSourcePickerDrag.mockResolvedValue(undefined);
+    apiMocks.getConnectedDevices.mockResolvedValue([]);
     windowMocks.close.mockResolvedValue(undefined);
     eventMocks.listen.mockResolvedValue(vi.fn());
   });
@@ -259,6 +261,13 @@ describe('SourcePicker', () => {
     await flushPromises();
 
     expect(apiMocks.createVirtualDisplay).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createVirtualDisplay).toHaveBeenCalledWith({
+      name: 'ScreenMirror Virtual Display',
+      width: 1920,
+      height: 1080,
+      refreshRate: 60,
+      hiDpi: true,
+    });
     expect(apiMocks.setCaptureTarget).toHaveBeenCalledWith({
       kind: 'screen',
       id: 2,
@@ -266,6 +275,50 @@ describe('SourcePicker', () => {
       quality: 0.75,
     });
     expect(windowMocks.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('automatically adapts virtual display resolution to connected iPad 4:3 device', async () => {
+    const wrapper = mountPicker(true);
+    await flushPromises();
+
+    apiMocks.getConnectedDevices.mockResolvedValueOnce([
+      {
+        id: 'conn-1',
+        name: 'Mobile Safari',
+        ip: '192.168.1.50',
+        os: 'iOS',
+        browser: 'Safari',
+        roomId: '123456',
+        sharingSessionId: 'conn-1',
+        screenWidth: 1024,
+        screenHeight: 768,
+        devicePixelRatio: 2,
+      },
+    ]);
+    apiMocks.createVirtualDisplay.mockResolvedValueOnce(101);
+    const virtualSource = {
+      id: 'screen:3',
+      sourceId: '101',
+      name: 'ScreenMirror iPad Retina Display',
+      kind: 'screen' as const,
+      isPrimary: false,
+      preview: null,
+      width: 1024,
+      height: 768,
+      isVirtual: true,
+    };
+    apiMocks.enumerateCaptureSources.mockResolvedValueOnce([...sources, virtualSource]);
+
+    await wrapper.get('[data-source-type="virtual"]').trigger('click');
+    await flushPromises();
+
+    expect(apiMocks.createVirtualDisplay).toHaveBeenCalledWith({
+      name: 'ScreenMirror iPad Retina Display',
+      width: 1024,
+      height: 768,
+      refreshRate: 60,
+      hiDpi: true,
+    });
   });
 
   it('shows virtual display badge and allows destroying from embedded card', async () => {

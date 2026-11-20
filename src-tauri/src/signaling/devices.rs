@@ -9,6 +9,12 @@ pub struct Device {
     pub browser: String,
     pub room_id: String,
     pub sharing_session_id: String,
+    #[serde(default, rename = "screenWidth", alias = "screen_width")]
+    pub screen_width: Option<u32>,
+    #[serde(default, rename = "screenHeight", alias = "screen_height")]
+    pub screen_height: Option<u32>,
+    #[serde(default, rename = "devicePixelRatio", alias = "device_pixel_ratio")]
+    pub device_pixel_ratio: Option<f64>,
 }
 
 pub struct ConnectedDevicesService {

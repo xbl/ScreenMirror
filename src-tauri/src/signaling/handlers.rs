@@ -313,6 +313,9 @@ async fn handle_socket(
     let mut viewer_os = "Unknown OS".to_string();
     let mut viewer_browser = "Unknown browser".to_string();
     let mut viewer_max_dimension = 1920_u32;
+    let mut viewer_screen_width: Option<u32> = None;
+    let mut viewer_screen_height: Option<u32> = None;
+    let mut viewer_dpr: Option<f64> = None;
 
     let read_loop = async {
         while let Some(msg) = ws_receiver.next().await {
@@ -347,6 +350,15 @@ async fn handle_socket(
                             if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str)
                             {
                                 viewer_browser = browser.to_string();
+                            }
+                            if let Some(w) = parsed.payload.get("screenWidth").and_then(Value::as_u64) {
+                                viewer_screen_width = Some(w as u32);
+                            }
+                            if let Some(h) = parsed.payload.get("screenHeight").and_then(Value::as_u64) {
+                                viewer_screen_height = Some(h as u32);
+                            }
+                            if let Some(dpr) = parsed.payload.get("devicePixelRatio").and_then(Value::as_f64) {
+                                viewer_dpr = Some(dpr);
                             }
                             viewer_max_dimension = parsed
                                 .payload
@@ -450,6 +462,9 @@ async fn handle_socket(
                                             browser: viewer_browser.clone(),
                                             room_id: room_id.clone(),
                                             sharing_session_id: room_id.clone(),
+                                            screen_width: viewer_screen_width,
+                                            screen_height: viewer_screen_height,
+                                            device_pixel_ratio: viewer_dpr,
                                         };
                                         state.devices.lock().add_device(device).ok();
                                         let _ = out_tx.send(

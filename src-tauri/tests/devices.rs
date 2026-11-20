@@ -9,6 +9,9 @@ fn dev(id: &str) -> Device {
         browser: "Safari".into(),
         room_id: "123456".into(),
         sharing_session_id: "sess-1".into(),
+        screen_width: None,
+        screen_height: None,
+        device_pixel_ratio: None,
     }
 }
 

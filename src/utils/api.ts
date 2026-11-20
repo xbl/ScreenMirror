@@ -8,6 +8,9 @@ export type Device = {
   browser: string;
   roomId: string;
   sharingSessionId: string;
+  screenWidth?: number;
+  screenHeight?: number;
+  devicePixelRatio?: number;
 };
 
 export type CaptureSourceKind = 'screen' | 'window';

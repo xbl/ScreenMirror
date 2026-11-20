@@ -208,7 +208,7 @@ import { LogicalSize } from '@tauri-apps/api/dpi';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from 'vue-i18n';
-import { api, type CaptureSourceInfo, type CaptureTarget, type CaptureTargetState } from '../utils/api';
+import { api, type CaptureSourceInfo, type CaptureTarget, type CaptureTargetState, type Device } from '../utils/api';
 
 type Quality = 'balanced' | 'high' | 'ultra';
 type PickerStep = 'types' | 'windows';
@@ -292,6 +292,46 @@ async function selectAndClose(source: CaptureSourceInfo) {
   if (selected) await closePicker();
 }
 
+function computeAutoVirtualDisplayGeometry(devices: Device[]): { width: number; height: number; name: string } {
+  const device = devices[0];
+  if (!device) {
+    return { width: 1920, height: 1080, name: 'ScreenMirror Virtual Display' };
+  }
+  const sw = device.screenWidth || (device as unknown as { screen_width?: number }).screen_width;
+  const sh = device.screenHeight || (device as unknown as { screen_height?: number }).screen_height;
+  if (!sw || !sh || sw <= 0 || sh <= 0) {
+    return { width: 1920, height: 1080, name: 'ScreenMirror Virtual Display' };
+  }
+
+  const maxDim = Math.max(sw, sh);
+  const minDim = Math.min(sw, sh);
+  const ratio = maxDim / minDim;
+
+  // 1. Tablet 4:3 (iPad classic, iPad Air/Pro - ratio approx 1.33 ~ 1.44)
+  if (ratio < 1.45) {
+    if (maxDim >= 1300) {
+      return { width: 1366, height: 1024, name: 'ScreenMirror iPad Retina Display' };
+    }
+    if (maxDim >= 1100) {
+      return { width: 1194, height: 834, name: 'ScreenMirror iPad Pro Retina Display' };
+    }
+    return { width: 1024, height: 768, name: 'ScreenMirror iPad Retina Display' };
+  }
+
+  // 2. Tablet 16:10 (Android Tablets, e.g. 2560x1600 or 1920x1200 - ratio approx 1.6)
+  if (ratio < 1.68) {
+    return { width: 1920, height: 1200, name: 'ScreenMirror Tablet Retina Display' };
+  }
+
+  // 3. Ultra-wide (21:9 - ratio >= 2.1)
+  if (ratio >= 2.1) {
+    return { width: 2560, height: 1080, name: 'ScreenMirror UltraWide Display' };
+  }
+
+  // 4. Standard 16:9 widescreen
+  return { width: 1920, height: 1080, name: 'ScreenMirror Retina Display' };
+}
+
 const creatingVirtual = ref(false);
 
 async function handleCreateVirtualDisplay() {
@@ -299,12 +339,22 @@ async function handleCreateVirtualDisplay() {
   creatingVirtual.value = true;
   error.value = '';
   try {
+    let target = { width: 1920, height: 1080, name: 'ScreenMirror Virtual Display' };
+    try {
+      const devices = await api.getConnectedDevices();
+      if (devices && devices.length > 0) {
+        target = computeAutoVirtualDisplayGeometry(devices);
+      }
+    } catch {
+      // Fallback to default
+    }
+
     const displayId = await api.createVirtualDisplay({
-      name: 'ScreenMirror Virtual Display',
-      width: 1920,
-      height: 1080,
+      name: target.name || 'ScreenMirror Virtual Display',
+      width: target.width,
+      height: target.height,
       refreshRate: 60,
-      hiDpi: false,
+      hiDpi: true,
     });
     await refreshSources(true);
     const virtualSource = sources.value.find((s) => s.sourceId === String(displayId));

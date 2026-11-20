@@ -7,6 +7,9 @@ export type ViewerMetadata = {
   os: string;
   browser: string;
   maxVideoDimension: number;
+  screenWidth?: number;
+  screenHeight?: number;
+  devicePixelRatio?: number;
 };
 
 export function getViewerMetadata(): ViewerMetadata {
@@ -35,7 +38,18 @@ export function getViewerMetadata(): ViewerMetadata {
             ? 'Safari'
             : 'Unknown browser';
   const visiblePixels = Math.ceil(Math.max(window.innerWidth, window.innerHeight) * window.devicePixelRatio);
-  return { os, browser, maxVideoDimension: Math.min(Math.max(visiblePixels, 640), 3840) };
+  const screenWidth = typeof window !== 'undefined' ? (window.screen.width || window.innerWidth) : 1920;
+  const screenHeight = typeof window !== 'undefined' ? (window.screen.height || window.innerHeight) : 1080;
+  const devicePixelRatio = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+
+  return {
+    os,
+    browser,
+    maxVideoDimension: Math.min(Math.max(visiblePixels, 640), 3840),
+    screenWidth,
+    screenHeight,
+    devicePixelRatio,
+  };
 }
 
 export function connectSignaling(

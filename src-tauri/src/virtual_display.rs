@@ -57,7 +57,7 @@ mod native {
         let width = if config.width == 0 { 1920 } else { config.width };
         let height = if config.height == 0 { 1080 } else { config.height };
         let refresh_rate = config.refresh_rate.unwrap_or(60.0);
-        let hi_dpi = if config.hi_dpi.unwrap_or(false) { 1 } else { 0 };
+        let hi_dpi = if config.hi_dpi.unwrap_or(true) { 1 } else { 0 };
 
         let display_id = unsafe {
             sm_virtual_display_create(c_name.as_ptr(), width, height, refresh_rate, hi_dpi)
