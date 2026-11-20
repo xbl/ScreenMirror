@@ -7,7 +7,7 @@
       :class="{ 'touch-control-active': touchControlEnabled }"
       autoplay
       playsinline
-      muted
+      :muted="isAudioMuted"
       disablepictureinpicture
       @loadedmetadata="onLoadedMetadata"
       @error="onVideoError"
@@ -33,21 +33,42 @@
       {{ t('player.streaming') }}
     </div>
 
-    <button
-      v-if="status === 'streaming'"
-      type="button"
-      class="player-touch-toggle"
-      :class="{ 'is-active': touchControlEnabled }"
-      :title="touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled')"
-      @click="toggleTouchControl"
-    >
-      <span class="touch-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-          <path d="M9 11.24V7.5a2.5 2.5 0 0 1 5 0v3.74c1.21-.81 2-2.18 2-3.74a4.5 4.5 0 0 0-9 0c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26A2 2 0 0 0 13.4 13.5H13v-6a1.5 1.5 0 0 0-3 0v10.74l-3.44-.72a1.5 1.5 0 0 0-1.54.49l-.78.89 4.93 4.93c.53.53 1.25.83 2 .83h6.24c1.47 0 2.71-1.07 2.95-2.53l.63-3.79a3 3 0 0 0-2.15-3.41z" />
-        </svg>
-      </span>
-      <span class="touch-label">{{ touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled') }}</span>
-    </button>
+    <div v-if="status === 'streaming'" class="player-top-controls">
+      <button
+        type="button"
+        class="player-btn player-audio-toggle"
+        :class="{ 'is-active': !isAudioMuted }"
+        :title="isAudioMuted ? t('player.unmute') : t('player.mute')"
+        :aria-label="isAudioMuted ? t('player.unmute') : t('player.mute')"
+        @click="toggleAudio"
+      >
+        <span class="btn-icon audio-icon" aria-hidden="true">
+          <svg v-if="!isAudioMuted" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27l4.73 4.73H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+          </svg>
+        </span>
+        <span class="btn-label audio-label">{{ isAudioMuted ? t('player.unmute') : t('player.mute') }}</span>
+      </button>
+
+      <button
+        type="button"
+        class="player-btn player-touch-toggle"
+        :class="{ 'is-active': touchControlEnabled }"
+        :title="touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled')"
+        :aria-label="touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled')"
+        @click="toggleTouchControl"
+      >
+        <span class="btn-icon touch-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M9 11.24V7.5a2.5 2.5 0 0 1 5 0v3.74c1.21-.81 2-2.18 2-3.74a4.5 4.5 0 0 0-9 0c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26A2 2 0 0 0 13.4 13.5H13v-6a1.5 1.5 0 0 0-3 0v10.74l-3.44-.72a1.5 1.5 0 0 0-1.54.49l-.78.89 4.93 4.93c.53.53 1.25.83 2 .83h6.24c1.47 0 2.71-1.07 2.95-2.53l.63-3.79a3 3 0 0 0-2.15-3.41z" />
+          </svg>
+        </span>
+        <span class="btn-label touch-label">{{ touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled') }}</span>
+      </button>
+    </div>
 
     <div v-if="status !== 'streaming'" class="player-center">
       <div v-if="noFrames" class="player-disconnected" role="alert">
@@ -101,7 +122,24 @@ useRemoteInput({ videoEl, canvasEl });
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
 const isUsingWebCodecs = ref(false);
+const isAudioMuted = ref(true);
 const renderer = new WebCodecsRenderer();
+
+function toggleAudio() {
+  isAudioMuted.value = !isAudioMuted.value;
+  const v = videoEl.value;
+  if (v) {
+    v.muted = isAudioMuted.value;
+    if (!isAudioMuted.value) {
+      v.volume = 1.0;
+      if (v.paused) {
+        void v.play().catch((err) => {
+          console.warn('[player-view] play after unmute failed:', err);
+        });
+      }
+    }
+  }
+}
 
 if (typeof window !== 'undefined') {
   (window as unknown as { __smWebCodecsRenderer?: WebCodecsRenderer }).__smWebCodecsRenderer = renderer;
@@ -542,10 +580,17 @@ onBeforeUnmount(() => {
   cursor: crosshair;
 }
 
-.player-touch-toggle {
+.player-top-controls {
   position: absolute;
   top: 14px;
   right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+
+.player-btn {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -560,22 +605,27 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: all var(--motion-fast) ease-out;
   user-select: none;
-  z-index: 10;
 }
 
-.player-touch-toggle:hover {
+.player-btn:hover {
   background: var(--surface);
   color: var(--text);
 }
 
-.player-touch-toggle.is-active {
+.player-btn.is-active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
-.player-touch-toggle.is-active:hover {
+.player-btn.is-active:hover {
   background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .webcodecs-canvas {

@@ -177,6 +177,7 @@ fn build_screen_capture_filter(
 pub fn start_screen_capture(
     target: CaptureTarget,
     fps: u32,
+    audio_sink: Option<super::audio_encoder::AudioFrameSink>,
 ) -> Result<ScreenKitCapture, ScreenKitError> {
     use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt, SCFrameStatus};
     use screencapturekit::stream::configuration::{PixelFormat, SCStreamConfiguration};
@@ -211,6 +212,14 @@ pub fn start_screen_capture(
         .with_queue_depth(3)
         .with_pixel_format(PixelFormat::BGRA);
     config.set_shows_cursor(true);
+
+    if audio_sink.is_some() {
+        use screencapturekit::stream::configuration::audio::{AudioChannelCount, AudioSampleRate};
+        config = config
+            .with_captures_audio(true)
+            .with_sample_rate(AudioSampleRate::Rate48000)
+            .with_channel_count(AudioChannelCount::Stereo);
+    }
 
     // Keep a shallow 2-frame channel to decouple real-time CoreMedia delivery
     // from the encoder loop without blocking either side.
@@ -302,6 +311,27 @@ pub fn start_screen_capture(
     stream
         .add_output_handler(handler, SCStreamOutputType::Screen)
         .ok_or_else(|| ScreenKitError::Unavailable("failed to register screen output".into()))?;
+
+    if let Some(audio_sink) = audio_sink {
+        let audio_encoder = Arc::new(Mutex::new(super::audio_encoder::AudioEncoder::new().ok()));
+        let audio_encoder_for_handler = audio_encoder.clone();
+        let stopped_for_audio = stopped.clone();
+        let audio_handler = move |sample: screencapturekit::cm::CMSampleBuffer,
+                                 output_type: SCStreamOutputType| {
+            if output_type != SCStreamOutputType::Audio || stopped_for_audio.load(Ordering::Acquire) {
+                return;
+            }
+            if let Ok(mut guard) = audio_encoder_for_handler.try_lock() {
+                if let Some(encoder) = guard.as_mut() {
+                    let _ = super::audio_capture::process_audio_sample(&sample, encoder, |frame| {
+                        audio_sink(frame);
+                    });
+                }
+            }
+        };
+        stream.add_output_handler(audio_handler, SCStreamOutputType::Audio);
+    }
+
     stream
         .start_capture()
         .map_err(|error| ScreenKitError::Unavailable(error.to_string()))?;
@@ -317,6 +347,7 @@ pub fn start_screen_capture(
 pub fn start_screen_capture(
     _target: CaptureTarget,
     _fps: u32,
+    _audio_sink: Option<super::audio_encoder::AudioFrameSink>,
 ) -> Result<ScreenKitCapture, ScreenKitError> {
     Err(ScreenKitError::UnsupportedPlatform)
 }
@@ -336,6 +367,7 @@ mod tests {
                 quality: 0.75,
             },
             15,
+            None,
         );
 
         assert!(matches!(result, Err(ScreenKitError::UnsupportedPlatform)));

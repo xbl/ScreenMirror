@@ -7,6 +7,7 @@ describe('useViewerStream', () => {
     activeStream,
     peerConnection,
     hasVideoTrack,
+    hasAudioTrack,
     setActiveStream,
     setPeerConnection,
     clearStream,
@@ -17,10 +18,11 @@ describe('useViewerStream', () => {
     reset();
   });
 
-  it('initializes with null stream and no video track', () => {
+  it('initializes with null stream and no video or audio track', () => {
     expect(activeStream.value).toBeNull();
     expect(peerConnection.value).toBeNull();
     expect(hasVideoTrack.value).toBe(false);
+    expect(hasAudioTrack.value).toBe(false);
   });
 
   it('updates state, sets global __smVideoTrack, and dispatches viewer-stream on setActiveStream', () => {
@@ -73,8 +75,26 @@ describe('useViewerStream', () => {
     expect(activeStream.value).toBeNull();
     expect(peerConnection.value).toBeNull();
     expect(hasVideoTrack.value).toBe(false);
+    expect(hasAudioTrack.value).toBe(false);
     expect((window as unknown as { __smVideoTrack?: boolean }).__smVideoTrack).toBeUndefined();
+    expect((window as unknown as { __smAudioTrack?: boolean }).__smAudioTrack).toBeUndefined();
     expect((window as unknown as { __smPc?: RTCPeerConnection }).__smPc).toBeUndefined();
+  });
+
+  it('correctly detects audio tracks when present on the stream', () => {
+    const mockAudioTrack = { id: 'audio-1', kind: 'audio' };
+    const mockVideoTrack = { id: 'video-1', kind: 'video' };
+    const mockStream = {
+      id: 'stream-audio-1',
+      getTracks: () => [mockVideoTrack, mockAudioTrack],
+      getVideoTracks: () => [mockVideoTrack],
+      getAudioTracks: () => [mockAudioTrack],
+    } as unknown as MediaStream;
+
+    setActiveStream(mockStream);
+    expect(hasVideoTrack.value).toBe(true);
+    expect(hasAudioTrack.value).toBe(true);
+    expect((window as unknown as { __smAudioTrack?: boolean }).__smAudioTrack).toBe(true);
   });
 
   it('synchronizes activeStream when viewer-stream event is dispatched externally', () => {

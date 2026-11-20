@@ -14,11 +14,12 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_rtp_timestamp, calculate_rtp_timestamp, dequeue_queued_frame, plan_target_switch, queue_admission,
-        require_expected_generation, should_drop_encoded_frame, HostPeer, QueueAdmission,
-        QueuedEncodedFrame, SharedCapture, TargetSwitchPlan,
+        advance_rtp_timestamp, calculate_audio_rtp_timestamp, calculate_rtp_timestamp,
+        dequeue_queued_frame, plan_target_switch, queue_admission, require_expected_generation,
+        should_drop_encoded_frame, HostPeer, QueueAdmission, QueuedEncodedFrame, SharedCapture,
+        TargetSwitchPlan,
     };
-    use crate::webrtc::H264EncodedFrame;
+    use crate::webrtc::{AudioEncodedFrame, H264EncodedFrame};
     use parking_lot::Mutex;
     use std::{
         sync::{mpsc, Arc},
@@ -246,6 +247,61 @@ mod tests {
             .await
             .expect("stop woke up notification waiters");
     }
+
+    #[test]
+    fn calculate_audio_rtp_timestamp_tracks_wallclock_and_preserves_monotonicity() {
+        let start = Instant::now();
+        let ts0 = calculate_audio_rtp_timestamp(start, start, -1);
+        assert_eq!(ts0, 0);
+
+        // 20ms frame = 960 samples at 48kHz
+        let t1 = start + Duration::from_millis(20);
+        let ts1 = calculate_audio_rtp_timestamp(start, t1, ts0);
+        assert_eq!(ts1, 960);
+
+        // 1 second static gap
+        let t2 = start + Duration::from_millis(1020);
+        let ts2 = calculate_audio_rtp_timestamp(start, t2, ts1);
+        assert_eq!(ts2, 48960);
+        assert!(ts2 > ts1 + 40000, "Audio RTP timestamp tracks real wallclock elapsed time across gaps");
+
+        // Monotonicity check even if clock does not advance
+        let ts3 = calculate_audio_rtp_timestamp(start, t2, ts2);
+        assert_eq!(ts3, ts2 + 1);
+    }
+
+    #[tokio::test]
+    async fn audio_frame_notification_wakes_waiter_on_enqueue() {
+        let peer = Arc::new(HostPeer::new());
+        let notify = peer.frame_notify.clone();
+        let frame = AudioEncodedFrame {
+            data: vec![0xf8, 0xff, 0xfe],
+            timestamp_samples: 960,
+            captured_at: Instant::now(),
+        };
+        assert!(peer.enqueue_audio_frame(frame));
+        tokio::time::timeout(Duration::from_millis(100), notify.notified())
+            .await
+            .expect("audio frame notification was signaled");
+    }
+
+    #[test]
+    fn shared_capture_delivers_audio_to_subscribed_peers() {
+        let shared = SharedCapture::new();
+        let peer = Arc::new(HostPeer::new());
+        shared.subscribe("peer-audio-test".into(), &peer);
+
+        let frame = AudioEncodedFrame {
+            data: vec![1, 2, 3],
+            timestamp_samples: 960,
+            captured_at: Instant::now(),
+        };
+        shared.deliver_audio(frame);
+
+        let dequeued = peer.audio_rx.lock().try_recv().expect("audio frame arrived");
+        assert_eq!(dequeued.data, vec![1, 2, 3]);
+        assert_eq!(dequeued.timestamp_samples, 960);
+    }
 }
 
 use parking_lot::Mutex;
@@ -253,7 +309,10 @@ use str0m::media::{MediaKind, MediaTime, Mid};
 use str0m::net::Receive;
 use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 
-use crate::webrtc::{spawn_video_capture_loop, CaptureTarget, H264EncodedFrame, VideoFrameSink};
+use crate::webrtc::{
+    spawn_video_capture_loop, AudioEncodedFrame, AudioFrameSink, CaptureTarget, H264EncodedFrame,
+    VideoFrameSink,
+};
 
 /// One capture/encode pipeline shared by every connected viewer. Each peer
 /// keeps its own bounded queue, so a slow receiver only loses its own stale
@@ -313,6 +372,20 @@ impl SharedCapture {
         }
     }
 
+    fn deliver_audio(&self, frame: AudioEncodedFrame) {
+        let peers = {
+            let mut subscribers = self.subscribers.lock();
+            subscribers.retain(|_, peer| peer.strong_count() != 0);
+            subscribers
+                .values()
+                .filter_map(Weak::upgrade)
+                .collect::<Vec<_>>()
+        };
+        for peer in peers {
+            peer.enqueue_audio_frame(frame.clone());
+        }
+    }
+
     pub fn request_keyframe(&self) {
         if let Some(handle) = self.handle.lock().as_ref() {
             handle.request_keyframe();
@@ -331,7 +404,13 @@ impl SharedCapture {
                 shared.deliver(frame);
             }
         });
-        *handle = Some(spawn_video_capture_loop(target, fps, sink));
+        let shared_audio = Arc::downgrade(self);
+        let audio_sink: AudioFrameSink = Arc::new(move |frame| {
+            if let Some(shared) = shared_audio.upgrade() {
+                shared.deliver_audio(frame);
+            }
+        });
+        *handle = Some(spawn_video_capture_loop(target, fps, sink, Some(audio_sink)));
     }
 
     pub fn switch_target(self: &Arc<Self>, target: CaptureTarget, fps: u32) -> Result<(), String> {
@@ -462,6 +541,12 @@ fn dequeue_queued_frame(
     frame_rx.lock().try_recv().ok()
 }
 
+fn dequeue_queued_audio(
+    audio_rx: &Arc<Mutex<std::sync::mpsc::Receiver<AudioEncodedFrame>>>,
+) -> Option<AudioEncodedFrame> {
+    audio_rx.lock().try_recv().ok()
+}
+
 struct CandidateCapture {
     generation: u64,
     handle: Option<crate::webrtc::CaptureHandle>,
@@ -563,9 +648,14 @@ pub struct HostPeer {
     pub channel_id: Arc<Mutex<Option<str0m::channel::ChannelId>>>,
     /// Negotiated video media identifier used by the RTP writer.
     pub video_mid: Arc<Mutex<Option<Mid>>>,
+    /// Negotiated audio media identifier used by the RTP writer.
+    pub audio_mid: Arc<Mutex<Option<Mid>>>,
     /// H.264 frame queue from capture thread to the RTC event loop.
     frame_tx: std::sync::mpsc::SyncSender<QueuedEncodedFrame>,
     frame_rx: Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+    /// Opus audio frame queue from capture thread to the RTC event loop.
+    audio_tx: std::sync::mpsc::SyncSender<AudioEncodedFrame>,
+    audio_rx: Arc<Mutex<std::sync::mpsc::Receiver<AudioEncodedFrame>>>,
     pub frame_notify: Arc<tokio::sync::Notify>,
     pub stopped: Arc<AtomicBool>,
 }
@@ -575,6 +665,7 @@ impl HostPeer {
         // Keep a bounded queue (up to 8 frames, ~260ms at 30fps) to absorb normal pipeline and
         // transmission jitter during rapid window motion without allowing lag accumulation.
         let (tx, rx) = std::sync::mpsc::sync_channel::<QueuedEncodedFrame>(8);
+        let (atx, arx) = std::sync::mpsc::sync_channel::<AudioEncodedFrame>(16);
         Self {
             rtc: Arc::new(Mutex::new(None)),
             socket: Arc::new(Mutex::new(None)),
@@ -589,8 +680,11 @@ impl HostPeer {
             frame_queue_lock: Arc::new(Mutex::new(())),
             channel_id: Arc::new(Mutex::new(None)),
             video_mid: Arc::new(Mutex::new(None)),
+            audio_mid: Arc::new(Mutex::new(None)),
             frame_tx: tx,
             frame_rx: Arc::new(Mutex::new(rx)),
+            audio_tx: atx,
+            audio_rx: Arc::new(Mutex::new(arx)),
             frame_notify: Arc::new(tokio::sync::Notify::new()),
             stopped: Arc::new(AtomicBool::new(false)),
         }
@@ -798,7 +892,7 @@ impl HostPeer {
                 }
             }
         });
-        let handle = spawn_video_capture_loop(target, fps, sink);
+        let handle = spawn_video_capture_loop(target, fps, sink, None);
         if ready_rx.recv_timeout(Duration::from_secs(5)).is_err() {
             handle.stop();
             return Err("capture did not produce an encoded keyframe within 5 seconds".into());
@@ -823,6 +917,21 @@ impl HostPeer {
         let _queue = self.frame_queue_lock.lock();
         let generation = self.capture_generation.load(Ordering::SeqCst);
         self.enqueue_frame_locked(QueuedEncodedFrame { generation, frame })
+    }
+
+    pub fn enqueue_audio_frame(&self, frame: AudioEncodedFrame) -> bool {
+        let sent = match self.audio_tx.try_send(frame) {
+            Ok(()) => true,
+            Err(std::sync::mpsc::TrySendError::Full(incoming)) => {
+                let _ = self.audio_rx.lock().try_recv();
+                self.audio_tx.try_send(incoming).is_ok()
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+        };
+        if sent {
+            self.frame_notify.notify_one();
+        }
+        sent
     }
 
     fn clear_queued_frames(&self) {
@@ -856,9 +965,11 @@ impl HostPeer {
         shared_capture.ensure_running(target, fps);
         let rtc_arc = self.rtc.clone();
         let frame_rx = self.frame_rx.clone();
+        let audio_rx = self.audio_rx.clone();
         let frame_notify = self.frame_notify.clone();
         let stopped = self.stopped.clone();
         let video_mid_slot = self.video_mid.clone();
+        let audio_mid_slot = self.audio_mid.clone();
         let capture_switch_lock = self.capture_switch_lock.clone();
         let capture_generation = self.capture_generation.clone();
         let rtp_timestamp_step = self.rtp_timestamp_step.clone();
@@ -869,9 +980,11 @@ impl HostPeer {
                 socket,
                 rtc_arc,
                 frame_rx,
+                audio_rx,
                 frame_notify,
                 stopped,
                 video_mid_slot,
+                audio_mid_slot,
                 capture_switch_lock,
                 capture_generation,
                 rtp_timestamp_step,
@@ -908,6 +1021,8 @@ async fn drain_rtc(
     socket: &tokio::net::UdpSocket,
     video_mid: &mut Option<Mid>,
     video_mid_slot: &Arc<Mutex<Option<Mid>>>,
+    audio_mid: &mut Option<Mid>,
+    audio_mid_slot: &Arc<Mutex<Option<Mid>>>,
     shared_capture: &Arc<SharedCapture>,
     peer_for_subscription: &Arc<HostPeer>,
     connection_id: &str,
@@ -945,7 +1060,20 @@ async fn drain_rtc(
                 *video_mid = Some(event.mid);
                 *video_mid_slot.lock() = *video_mid;
                 tracing::info!(
-                    "host: MediaAdded mid={:?} direction={:?}",
+                    "host: Video MediaAdded mid={:?} direction={:?}",
+                    event.mid,
+                    event.direction
+                );
+                if !*subscribed {
+                    shared_capture.subscribe(connection_id.to_string(), peer_for_subscription);
+                    *subscribed = true;
+                }
+            }
+            Ok(Output::Event(Event::MediaAdded(event))) if event.kind == MediaKind::Audio => {
+                *audio_mid = Some(event.mid);
+                *audio_mid_slot.lock() = *audio_mid;
+                tracing::info!(
+                    "host: Audio MediaAdded mid={:?} direction={:?}",
                     event.mid,
                     event.direction
                 );
@@ -997,6 +1125,63 @@ async fn drain_rtc(
             }
         }
     }
+}
+
+fn write_audio_frame(
+    mid: Mid,
+    frame: AudioEncodedFrame,
+    rtc_arc: &Arc<Mutex<Option<Rtc>>>,
+    stream_start: &mut Option<Instant>,
+    last_timestamp: &mut i64,
+) -> bool {
+    if frame.data.is_empty() {
+        return false;
+    }
+    let now = Instant::now();
+    let mut guard = rtc_arc.lock();
+    if let Some(rtc) = guard.as_mut() {
+        if let Some(writer) = rtc.writer(mid) {
+            let opus_pt = writer
+                .payload_params()
+                .iter()
+                .find(|p| matches!(p.spec().codec, str0m::format::Codec::Opus));
+            let pt = match opus_pt {
+                Some(p) => p.pt(),
+                None => {
+                    tracing::warn!("host: no Opus PT in payload_params for mid={:?}", mid);
+                    return false;
+                }
+            };
+            let start = stream_start.get_or_insert(frame.captured_at);
+            let rtp_ts = calculate_audio_rtp_timestamp(*start, frame.captured_at, *last_timestamp);
+            *last_timestamp = rtp_ts;
+            if let Err(error) = writer.write(
+                pt,
+                now,
+                MediaTime::new(rtp_ts, 48_000),
+                frame.data,
+            ) {
+                tracing::warn!("host: Opus audio writer failed: {error}");
+                return false;
+            }
+            if let Err(error) = rtc.handle_input(Input::Timeout(now)) {
+                tracing::warn!("host: failed to flush timeout after audio write: {error}");
+            }
+            return true;
+        }
+    }
+    false
+}
+
+pub fn calculate_audio_rtp_timestamp(
+    start: Instant,
+    captured_at: Instant,
+    last_timestamp: i64,
+) -> i64 {
+    let elapsed = captured_at.saturating_duration_since(start);
+    // 48 kHz RTP clock: 48 ticks per millisecond = 48_000 ticks per second
+    let pts = (elapsed.as_micros() as u64 * 48 / 1_000) as i64;
+    (last_timestamp + 1).max(pts)
 }
 
 fn write_video_frame(
@@ -1066,9 +1251,11 @@ async fn run_rtc_event_loop(
     socket: tokio::net::UdpSocket,
     rtc_arc: Arc<Mutex<Option<Rtc>>>,
     frame_rx: Arc<Mutex<std::sync::mpsc::Receiver<QueuedEncodedFrame>>>,
+    audio_rx: Arc<Mutex<std::sync::mpsc::Receiver<AudioEncodedFrame>>>,
     frame_notify: Arc<tokio::sync::Notify>,
     stopped: Arc<AtomicBool>,
     video_mid_slot: Arc<Mutex<Option<Mid>>>,
+    audio_mid_slot: Arc<Mutex<Option<Mid>>>,
     capture_switch_lock: Arc<Mutex<()>>,
     capture_generation: Arc<AtomicU64>,
     _rtp_timestamp_step: Arc<AtomicI64>,
@@ -1078,8 +1265,11 @@ async fn run_rtc_event_loop(
 ) {
     let mut buf = vec![0u8; 2000];
     let mut video_mid: Option<Mid> = None;
+    let mut audio_mid: Option<Mid> = None;
     let mut stream_start: Option<Instant> = None;
+    let mut audio_stream_start: Option<Instant> = None;
     let mut last_timestamp: i64 = -1;
+    let mut last_audio_timestamp: i64 = -1;
     let mut subscribed = false;
 
     let local_addr = match socket.local_addr() {
@@ -1095,6 +1285,8 @@ async fn run_rtc_event_loop(
         &socket,
         &mut video_mid,
         &video_mid_slot,
+        &mut audio_mid,
+        &audio_mid_slot,
         &shared_capture,
         &peer_for_subscription,
         &connection_id,
@@ -1116,7 +1308,7 @@ async fn run_rtc_event_loop(
             break 'outer;
         }
 
-        // Drain any pending frames if video_mid is known
+        // Drain any pending video frames if video_mid is known
         if let Some(mid) = video_mid {
             while let Some(queued) = dequeue_queued_frame(&frame_rx) {
                 if write_video_frame(
@@ -1133,6 +1325,39 @@ async fn run_rtc_event_loop(
                         &socket,
                         &mut video_mid,
                         &video_mid_slot,
+                        &mut audio_mid,
+                        &audio_mid_slot,
+                        &shared_capture,
+                        &peer_for_subscription,
+                        &connection_id,
+                        &mut subscribed,
+                    )
+                    .await
+                    {
+                        DrainOutcome::Timeout(d) => next_deadline = d,
+                        DrainOutcome::Closed => break 'outer,
+                    }
+                }
+            }
+        }
+
+        // Drain any pending audio frames if audio_mid is known
+        if let Some(mid) = audio_mid {
+            while let Some(audio_frame) = dequeue_queued_audio(&audio_rx) {
+                if write_audio_frame(
+                    mid,
+                    audio_frame,
+                    &rtc_arc,
+                    &mut audio_stream_start,
+                    &mut last_audio_timestamp,
+                ) {
+                    match drain_rtc(
+                        &rtc_arc,
+                        &socket,
+                        &mut video_mid,
+                        &video_mid_slot,
+                        &mut audio_mid,
+                        &audio_mid_slot,
                         &shared_capture,
                         &peer_for_subscription,
                         &connection_id,
@@ -1177,6 +1402,37 @@ async fn run_rtc_event_loop(
                                 &socket,
                                 &mut video_mid,
                                 &video_mid_slot,
+                                &mut audio_mid,
+                                &audio_mid_slot,
+                                &shared_capture,
+                                &peer_for_subscription,
+                                &connection_id,
+                                &mut subscribed,
+                            )
+                            .await
+                            {
+                                DrainOutcome::Timeout(d) => next_deadline = d,
+                                DrainOutcome::Closed => break 'outer,
+                            }
+                        }
+                    }
+                }
+                if let Some(mid) = audio_mid {
+                    while let Some(audio_frame) = dequeue_queued_audio(&audio_rx) {
+                        if write_audio_frame(
+                            mid,
+                            audio_frame,
+                            &rtc_arc,
+                            &mut audio_stream_start,
+                            &mut last_audio_timestamp,
+                        ) {
+                            match drain_rtc(
+                                &rtc_arc,
+                                &socket,
+                                &mut video_mid,
+                                &video_mid_slot,
+                                &mut audio_mid,
+                                &audio_mid_slot,
                                 &shared_capture,
                                 &peer_for_subscription,
                                 &connection_id,
@@ -1218,6 +1474,8 @@ async fn run_rtc_event_loop(
                                 &socket,
                                 &mut video_mid,
                                 &video_mid_slot,
+                                &mut audio_mid,
+                                &audio_mid_slot,
                                 &shared_capture,
                                 &peer_for_subscription,
                                 &connection_id,
@@ -1249,6 +1507,8 @@ async fn run_rtc_event_loop(
                     &socket,
                     &mut video_mid,
                     &video_mid_slot,
+                    &mut audio_mid,
+                    &audio_mid_slot,
                     &shared_capture,
                     &peer_for_subscription,
                     &connection_id,

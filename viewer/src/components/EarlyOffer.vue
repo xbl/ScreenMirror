@@ -61,6 +61,8 @@ async function startNegotiation() {
   }
 
   pc.value.addTransceiver('video', { direction: 'recvonly' });
+  pc.value.addTransceiver('audio', { direction: 'recvonly' });
+  const fallbackStream = new MediaStream();
   pc.value.ontrack = (event) => {
     // Keep both receive-side delay knobs at zero for this interactive LAN
     // display; late packets should be dropped instead of adding stale frames.
@@ -71,11 +73,18 @@ async function startNegotiation() {
     } catch {
       // Older browsers may expose the property as read-only or not support it.
     }
-    const stream = event.streams[0] ?? new MediaStream([event.track]);
-    console.log('[early-offer] video track received', event.track.kind);
-    // Expose stream in reactive store immediately (also dispatches 'viewer-stream' and sets __smVideoTrack)
+    console.log('[early-offer] track received', event.track.kind);
+    const stream = event.streams[0] ?? fallbackStream;
+    if (!event.streams || !event.streams[0]) {
+      if (!fallbackStream.getTracks().some((t) => t.id === event.track.id)) {
+        fallbackStream.addTrack(event.track);
+      }
+    }
+    // Expose stream in reactive store immediately (also dispatches 'viewer-stream')
     setActiveStream(stream);
-    emit('ready');
+    if (event.track.kind === 'video') {
+      emit('ready');
+    }
   };
 
   pc.value.onicecandidate = (e) => {
@@ -119,7 +128,7 @@ async function startNegotiation() {
   // createOffer puts PC into have-local-offer so setRemoteDescription(answer)
   // is well-defined.
   const offer = await pc.value.createOffer({
-    offerToReceiveAudio: false,
+    offerToReceiveAudio: true,
     offerToReceiveVideo: true,
   });
   await pc.value.setLocalDescription(offer);

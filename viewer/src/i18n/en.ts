@@ -34,6 +34,10 @@ export default {
     disconnected: 'Connection lost',
     reconnect: 'Reconnect',
     noFrames: 'No video — reconnect?',
+    mute: 'Mute',
+    unmute: 'Unmute',
+    audioMuted: 'Audio Muted',
+    audioUnmuted: 'Audio Playing',
   },
   remoteControl: {
     toggle: 'Touch Control',

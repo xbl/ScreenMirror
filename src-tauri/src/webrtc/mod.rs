@@ -9,6 +9,8 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+pub mod audio_capture;
+pub mod audio_encoder;
 #[cfg(not(feature = "screenkit"))]
 pub mod ffi;
 pub mod host;
@@ -18,6 +20,7 @@ pub mod video_toolbox_iosurface;
 #[cfg(not(feature = "screenkit"))]
 pub mod video_toolbox_native;
 
+pub use audio_encoder::{AudioEncodedFrame, AudioEncoder, AudioFrameSink, generate_synthetic_audio_frame};
 pub use host::{HostPeer, SharedCapture};
 pub use screencapturekit_capture::{
     start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame,
@@ -794,12 +797,36 @@ pub fn spawn_video_capture_loop(
     target: CaptureTarget,
     fps: u32,
     sink: VideoFrameSink,
+    audio_sink: Option<AudioFrameSink>,
 ) -> CaptureHandle {
     let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
     let force_keyframe = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let encoder_force_keyframe = force_keyframe.clone();
+
+    if let Some(audio_sink) = audio_sink.clone() {
+        if matches!(target.kind, CaptureKind::TestPattern) {
+            let audio_running = running.clone();
+            std::thread::spawn(move || {
+                let mut encoder = match AudioEncoder::new() {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        tracing::warn!("synthetic audio encoder init failed: {e}");
+                        return;
+                    }
+                };
+                let mut phase = 0.0f32;
+                while audio_running.load(std::sync::atomic::Ordering::Relaxed) {
+                    let pcm = generate_synthetic_audio_frame(440.0, &mut phase);
+                    let _ = encoder.push_pcm_and_encode(&pcm, |frame| {
+                        audio_sink(frame);
+                    });
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            });
+        }
+    }
     // Keep exactly one pending capture. A slow encoder must consume the newest
     // frame available, never a queue of already-stale frames.
     let frame_slot = Arc::new((Mutex::new(None::<CapturedFrame>), Condvar::new()));
@@ -1110,7 +1137,7 @@ pub fn spawn_video_capture_loop(
         };
         #[cfg(all(target_os = "macos", feature = "screenkit"))]
         let mut screenkit_capture = if use_screenkit_capture {
-            match start_screen_capture(target.clone(), fps) {
+            match start_screen_capture(target.clone(), fps, audio_sink.clone()) {
                 Ok(capture) => {
                     tracing::info!(
                         "using ScreenCaptureKit latest-frame capture (IOSurface encoder available={})",

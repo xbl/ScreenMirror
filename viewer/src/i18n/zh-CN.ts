@@ -34,6 +34,10 @@ export default {
     disconnected: '连接已断开',
     reconnect: '重新连接',
     noFrames: '没有画面 — 重新连接?',
+    mute: '静音',
+    unmute: '开启声音',
+    audioMuted: '声音已静音',
+    audioUnmuted: '声音已开启',
   },
   remoteControl: {
     toggle: '触控控制',
