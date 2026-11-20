@@ -47,9 +47,15 @@ export default {
     disabled: 'Control OFF',
     hint: 'Tap to click, long press for right click, two fingers to scroll',
     keyboard: 'Keyboard',
-    keyboardOpen: 'Keyboard',
+    keyboardOpen: 'Keyboard Input',
     keyboardClose: 'Hide Keyboard',
     resetZoom: 'Reset 1.0x',
+    inputPlaceholder: 'Type text to send to computer...',
+    send: 'Send',
+    clearText: 'Clear',
+    keyEnter: 'Enter',
+    keyBackspace: 'Backspace',
+    keySpace: 'Space',
   },
 };
 

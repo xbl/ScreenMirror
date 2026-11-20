@@ -367,7 +367,7 @@ pub fn set_capture_target(
     if has_peers {
         state.shared_capture.switch_target(target.clone(), fps)?;
         let mut mobile_target = target.clone();
-        mobile_target.quality = mobile_target.quality.min(0.5);
+        mobile_target.quality = mobile_target.quality.min(0.75);
         state.mobile_capture.switch_target(
             mobile_target.clone(),
             crate::webrtc::profile_fps(mobile_target.quality),

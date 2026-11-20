@@ -423,7 +423,7 @@ async fn handle_socket(
                                             );
                                             let mut target = target;
                                             if mobile {
-                                                target.quality = target.quality.min(0.5);
+                                                target.quality = target.quality.min(0.75);
                                             }
                                             let fps = crate::webrtc::profile_fps(target.quality);
                                             if let Err(error) = peer_entry.clone().start_sharing(

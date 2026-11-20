@@ -111,6 +111,7 @@
       v-if="status === 'streaming' && zoomScale > 1.05"
       type="button"
       class="player-zoom-badge"
+      :class="{ 'keyboard-docked': isKeyboardActive }"
       :title="t('remoteControl.resetZoom')"
       @click="resetZoom"
     >
@@ -118,23 +119,104 @@
       <span class="zoom-reset-label">{{ t('remoteControl.resetZoom') }}</span>
     </button>
 
-    <input
-      ref="keyboardInputEl"
-      type="text"
-      class="player-keyboard-input"
-      autocomplete="off"
-      autocorrect="off"
-      autocapitalize="off"
-      spellcheck="false"
-      inputmode="text"
-      enterkeyhint="go"
-      tabindex="-1"
-      aria-hidden="true"
-      @input="onKeyboardInput"
-      @keydown="onKeyboardKeyDown"
-      @focus="isKeyboardActive = true"
-      @blur="isKeyboardActive = false"
-    />
+    <!-- Remote Input Bar for Mobile & Desktop -->
+    <div
+      v-if="isKeyboardActive"
+      class="player-input-bar"
+      role="region"
+      aria-label="Remote Text Input Toolbar"
+    >
+      <div class="player-input-row">
+        <div class="player-input-wrapper">
+          <input
+            ref="keyboardInputEl"
+            v-model="keyboardText"
+            type="text"
+            class="player-input-field"
+            :placeholder="t('remoteControl.inputPlaceholder')"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            enterkeyhint="send"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
+            @keydown.enter.prevent="sendComposedText"
+          />
+          <button
+            v-if="keyboardText.length > 0"
+            type="button"
+            class="player-input-clear-btn"
+            :title="t('remoteControl.clearText')"
+            aria-label="Clear"
+            @click="keyboardText = ''"
+          >
+            ✕
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="player-input-send-btn"
+          :disabled="keyboardText.trim().length === 0"
+          :title="t('remoteControl.send')"
+          @click="sendComposedText"
+        >
+          <span class="send-label">{{ t('remoteControl.send') }}</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          class="player-input-close-btn"
+          :title="t('remoteControl.keyboardClose')"
+          aria-label="Close"
+          @click="toggleKeyboard"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="player-input-shortcuts">
+        <button
+          type="button"
+          class="player-shortcut-btn"
+          @click="sendShortcutKey('Enter')"
+        >
+          ↵ {{ t('remoteControl.keyEnter') }}
+        </button>
+        <button
+          type="button"
+          class="player-shortcut-btn"
+          @click="sendShortcutKey('Backspace')"
+        >
+          ⌫ {{ t('remoteControl.keyBackspace') }}
+        </button>
+        <button
+          type="button"
+          class="player-shortcut-btn"
+          @click="sendShortcutKey('Space')"
+        >
+          ␣ {{ t('remoteControl.keySpace') }}
+        </button>
+        <button
+          type="button"
+          class="player-shortcut-btn"
+          @click="sendShortcutKey('Tab')"
+        >
+          ⇥ Tab
+        </button>
+        <button
+          type="button"
+          class="player-shortcut-btn"
+          @click="sendShortcutKey('Escape')"
+        >
+          ⎋ Esc
+        </button>
+      </div>
+    </div>
 
     <div v-if="status !== 'streaming'" class="player-center">
       <div v-if="noFrames" class="player-disconnected" role="alert">
@@ -169,7 +251,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useViewerStatus } from '../lib/viewerStatus';
 import { useViewerStream } from '../lib/viewerStream';
@@ -204,55 +286,52 @@ const videoTransformStyle = computed(() => {
 
 const keyboardInputEl = ref<HTMLInputElement | null>(null);
 const isKeyboardActive = ref(false);
+const keyboardText = ref('');
+const isComposing = ref(false);
 
 function toggleKeyboard() {
-  const el = keyboardInputEl.value;
-  if (!el) return;
+  isKeyboardActive.value = !isKeyboardActive.value;
   if (isKeyboardActive.value) {
-    el.blur();
+    void nextTick(() => {
+      keyboardInputEl.value?.focus();
+    });
   } else {
-    el.focus();
+    keyboardText.value = '';
+    keyboardInputEl.value?.blur();
   }
 }
 
-function onKeyboardInput(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const val = input.value;
-  if (val && val.length > 0) {
+function onCompositionStart() {
+  isComposing.value = true;
+}
+
+function onCompositionEnd() {
+  isComposing.value = false;
+}
+
+function sendComposedText() {
+  if (isComposing.value) return;
+  const text = keyboardText.value;
+  if (text.length > 0) {
     sendRemoteInput({
       action: 'text_input',
-      text: val,
+      text,
     });
-    input.value = '';
+    keyboardText.value = '';
   }
+  void nextTick(() => {
+    keyboardInputEl.value?.focus();
+  });
 }
 
-function onKeyboardKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Backspace') {
-    e.preventDefault();
-    sendRemoteInput({
-      action: 'key_click',
-      key: 'Backspace',
-    });
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    sendRemoteInput({
-      action: 'key_click',
-      key: 'Enter',
-    });
-  } else if (e.key === 'Tab') {
-    e.preventDefault();
-    sendRemoteInput({
-      action: 'key_click',
-      key: 'Tab',
-    });
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    sendRemoteInput({
-      action: 'key_click',
-      key: 'Escape',
-    });
-  }
+function sendShortcutKey(key: string) {
+  sendRemoteInput({
+    action: 'key_click',
+    key,
+  });
+  void nextTick(() => {
+    keyboardInputEl.value?.focus();
+  });
 }
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
@@ -762,6 +841,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--canvas);
 }
@@ -962,17 +1042,154 @@ onBeforeUnmount(() => {
   }
 }
 
-.player-keyboard-input {
+.player-input-bar {
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+  right: 0;
+  z-index: 60;
+  padding: 8px 12px max(8px, env(safe-area-inset-bottom, 8px));
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slide-up 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.player-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.player-input-field {
+  width: 100%;
+  height: 38px;
+  padding: 0 32px 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 38px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.player-input-field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.player-input-clear-btn {
+  position: absolute;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   border: none;
-  padding: 0;
-  margin: 0;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.player-input-send-btn {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.player-input-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.player-input-send-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.player-input-close-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.player-input-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+.player-shortcut-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.player-shortcut-btn:active {
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  border-color: var(--accent);
 }
 
 .player-zoom-badge {
@@ -995,6 +1212,10 @@ onBeforeUnmount(() => {
   z-index: 10;
   transition: all var(--motion-fast) ease-out;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.player-zoom-badge.keyboard-docked {
+  bottom: 100px;
 }
 
 .player-zoom-badge:hover {

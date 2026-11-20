@@ -145,36 +145,61 @@ async function main() {
     }
     console.log('✅ Assertion passed: All 4 controls (Audio, Touch, Keyboard, Fullscreen) are rendered');
 
-    // 1. Test Keyboard Input
+    // 1. Test Keyboard Input Bar
     console.log('[sim-mobile] testing Virtual Keyboard invocation...');
     await page.click('.player-keyboard-toggle');
     await new Promise((r) => setTimeout(r, 400));
 
     const kbActive = await page.evaluate(() => {
       const btn = document.querySelector('.player-keyboard-toggle');
-      const input = document.querySelector('input.player-keyboard-input');
+      const bar = document.querySelector('.player-input-bar');
+      const input = document.querySelector('input.player-input-field');
+      const sendBtn = document.querySelector('button.player-input-send-btn');
       return {
         isActive: btn?.classList.contains('is-active'),
+        isBarVisible: Boolean(bar),
         isFocused: document.activeElement === input,
+        isSendDisabled: sendBtn?.hasAttribute('disabled'),
       };
     });
     console.log('[sim-mobile] keyboard active state:', JSON.stringify(kbActive, null, 2));
-    if (!kbActive.isActive) {
-      throw new Error('Assertion failed: Keyboard button should be active when opened');
+    if (!kbActive.isActive || !kbActive.isBarVisible) {
+      throw new Error('Assertion failed: Keyboard toolbar (.player-input-bar) must be active and visible');
     }
 
-    // Type text into the keyboard proxy
-    console.log('[sim-mobile] typing text via keyboard proxy: "Hello ScreenMirror 🚀"...');
-    await page.type('input.player-keyboard-input', 'Hello ScreenMirror 🚀');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.press('Enter');
+    // Type text into the remote input toolbar
+    console.log('[sim-mobile] typing composed Chinese text: "你好 ScreenMirror 🚀"...');
+    await page.type('input.player-input-field', '你好 ScreenMirror 🚀');
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Verify Send button becomes enabled
+    const sendEnabled = await page.evaluate(() => {
+      const sendBtn = document.querySelector('button.player-input-send-btn');
+      return !sendBtn?.hasAttribute('disabled');
+    });
+    if (!sendEnabled) {
+      throw new Error('Assertion failed: Send button should be enabled when text is typed');
+    }
+
+    // Click Send button
+    console.log('[sim-mobile] clicking Send button (.player-input-send-btn)...');
+    await page.click('button.player-input-send-btn');
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Test shortcut button (e.g., Enter)
+    console.log('[sim-mobile] clicking shortcut Enter key...');
+    await page.evaluate(() => {
+      const shortcuts = Array.from(document.querySelectorAll('.player-shortcut-btn'));
+      const enterBtn = shortcuts.find((b) => b.textContent?.includes('回车') || b.textContent?.includes('Enter'));
+      enterBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
 
     const shot1 = path.join(OUT_DIR, 'sim-mobile-1-keyboard.png');
     await page.screenshot({ path: shot1 });
-    console.log(`✅ Assertion passed: Virtual keyboard active & input sent! Screenshot saved to ${shot1}`);
+    console.log(`✅ Assertion passed: Virtual keyboard toolbar active & text sent! Screenshot saved to ${shot1}`);
 
-    // Dismiss keyboard
-    await page.click('.player-keyboard-toggle');
+    // Dismiss keyboard via close button
+    await page.click('.player-input-close-btn');
     await new Promise((r) => setTimeout(r, 300));
 
     // 2. Test Zoom & Pan
