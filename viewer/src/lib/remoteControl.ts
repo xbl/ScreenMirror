@@ -8,7 +8,11 @@ export type RemoteInputEvent =
   | { action: 'mouse_up'; x: number; y: number; button?: RemoteMouseButton; click_count?: number }
   | { action: 'mouse_click'; x: number; y: number; button?: RemoteMouseButton; click_count?: number }
   | { action: 'mouse_drag'; x: number; y: number; button?: RemoteMouseButton }
-  | { action: 'scroll'; x: number; y: number; delta_x: number; delta_y: number };
+  | { action: 'scroll'; x: number; y: number; delta_x: number; delta_y: number }
+  | { action: 'text_input'; text: string }
+  | { action: 'key_click'; key: string; modifiers?: number }
+  | { action: 'key_down'; key: string; modifiers?: number }
+  | { action: 'key_up'; key: string; modifiers?: number };
 
 const STORAGE_KEY = 'screenmirror_touch_control';
 

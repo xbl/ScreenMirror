@@ -5,6 +5,7 @@
       ref="videoEl"
       class="frame"
       :class="{ 'touch-control-active': touchControlEnabled }"
+      :style="videoTransformStyle"
       autoplay
       playsinline
       :muted="isAudioMuted"
@@ -20,6 +21,7 @@
       ref="canvasEl"
       v-show="isUsingWebCodecs"
       class="webcodecs-canvas"
+      :style="videoTransformStyle"
       aria-hidden="true"
     />
 
@@ -71,6 +73,22 @@
 
       <button
         type="button"
+        class="player-btn player-keyboard-toggle"
+        :class="{ 'is-active': isKeyboardActive }"
+        :title="isKeyboardActive ? t('remoteControl.keyboardClose') : t('remoteControl.keyboardOpen')"
+        :aria-label="isKeyboardActive ? t('remoteControl.keyboardClose') : t('remoteControl.keyboardOpen')"
+        @click="toggleKeyboard"
+      >
+        <span class="btn-icon keyboard-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z" />
+          </svg>
+        </span>
+        <span class="btn-label keyboard-label">{{ isKeyboardActive ? t('remoteControl.keyboardClose') : t('remoteControl.keyboardOpen') }}</span>
+      </button>
+
+      <button
+        type="button"
         class="player-btn player-fullscreen-toggle"
         :class="{ 'is-active': isFullscreen }"
         :title="isFullscreen ? t('player.exitFullscreen') : t('player.fullscreen')"
@@ -88,6 +106,35 @@
         <span class="btn-label fullscreen-label">{{ isFullscreen ? t('player.exitFullscreen') : t('player.fullscreen') }}</span>
       </button>
     </div>
+
+    <button
+      v-if="status === 'streaming' && zoomScale > 1.05"
+      type="button"
+      class="player-zoom-badge"
+      :title="t('remoteControl.resetZoom')"
+      @click="resetZoom"
+    >
+      <span class="zoom-text">{{ zoomScale.toFixed(1) }}x</span>
+      <span class="zoom-reset-label">{{ t('remoteControl.resetZoom') }}</span>
+    </button>
+
+    <input
+      ref="keyboardInputEl"
+      type="text"
+      class="player-keyboard-input"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      inputmode="text"
+      enterkeyhint="go"
+      tabindex="-1"
+      aria-hidden="true"
+      @input="onKeyboardInput"
+      @keydown="onKeyboardKeyDown"
+      @focus="isKeyboardActive = true"
+      @blur="isKeyboardActive = false"
+    />
 
     <div v-if="status !== 'streaming'" class="player-center">
       <div v-if="noFrames" class="player-disconnected" role="alert">
@@ -122,7 +169,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useViewerStatus } from '../lib/viewerStatus';
 import { useViewerStream } from '../lib/viewerStream';
@@ -137,7 +184,76 @@ const { touchControlEnabled, toggleTouchControl } = useRemoteControl();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
-useRemoteInput({ videoEl, canvasEl });
+const {
+  zoomScale,
+  panX,
+  panY,
+  resetZoom,
+  sendRemoteInput,
+} = useRemoteInput({ videoEl, canvasEl });
+
+const videoTransformStyle = computed(() => {
+  if (zoomScale.value <= 1.0 && panX.value === 0 && panY.value === 0) {
+    return {};
+  }
+  return {
+    transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoomScale.value})`,
+    transformOrigin: '0 0',
+  };
+});
+
+const keyboardInputEl = ref<HTMLInputElement | null>(null);
+const isKeyboardActive = ref(false);
+
+function toggleKeyboard() {
+  const el = keyboardInputEl.value;
+  if (!el) return;
+  if (isKeyboardActive.value) {
+    el.blur();
+  } else {
+    el.focus();
+  }
+}
+
+function onKeyboardInput(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const val = input.value;
+  if (val && val.length > 0) {
+    sendRemoteInput({
+      action: 'text_input',
+      text: val,
+    });
+    input.value = '';
+  }
+}
+
+function onKeyboardKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    sendRemoteInput({
+      action: 'key_click',
+      key: 'Backspace',
+    });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    sendRemoteInput({
+      action: 'key_click',
+      key: 'Enter',
+    });
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    sendRemoteInput({
+      action: 'key_click',
+      key: 'Tab',
+    });
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    sendRemoteInput({
+      action: 'key_click',
+      key: 'Escape',
+    });
+  }
+}
 const pendingStream = ref<MediaStream | null>(null);
 const noFrames = ref(false);
 const isUsingWebCodecs = ref(false);
@@ -836,5 +952,50 @@ onBeforeUnmount(() => {
     padding: 7px;
     border-radius: var(--radius-sm);
   }
+}
+
+.player-keyboard-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.player-zoom-badge {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(16px);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 10;
+  transition: all var(--motion-fast) ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.player-zoom-badge:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.zoom-text {
+  color: var(--accent);
+  font-weight: 600;
 }
 </style>

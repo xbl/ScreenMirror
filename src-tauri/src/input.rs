@@ -68,17 +68,39 @@ pub enum RemoteInputEvent {
         #[serde(default)]
         delta_y: f64,
     },
+    TextInput {
+        text: String,
+    },
+    KeyClick {
+        key: String,
+        #[serde(default)]
+        modifiers: Option<u32>,
+    },
+    KeyDown {
+        key: String,
+        #[serde(default)]
+        modifiers: Option<u32>,
+    },
+    KeyUp {
+        key: String,
+        #[serde(default)]
+        modifiers: Option<u32>,
+    },
 }
 
 impl RemoteInputEvent {
-    pub fn normalized_coords(&self) -> (f64, f64) {
+    pub fn normalized_coords(&self) -> Option<(f64, f64)> {
         match self {
-            Self::MouseMove { x, y } => (*x, *y),
-            Self::MouseDown { x, y, .. } => (*x, *y),
-            Self::MouseUp { x, y, .. } => (*x, *y),
-            Self::MouseClick { x, y, .. } => (*x, *y),
-            Self::MouseDrag { x, y, .. } => (*x, *y),
-            Self::Scroll { x, y, .. } => (*x, *y),
+            Self::MouseMove { x, y } => Some((*x, *y)),
+            Self::MouseDown { x, y, .. } => Some((*x, *y)),
+            Self::MouseUp { x, y, .. } => Some((*x, *y)),
+            Self::MouseClick { x, y, .. } => Some((*x, *y)),
+            Self::MouseDrag { x, y, .. } => Some((*x, *y)),
+            Self::Scroll { x, y, .. } => Some((*x, *y)),
+            Self::TextInput { .. }
+            | Self::KeyClick { .. }
+            | Self::KeyDown { .. }
+            | Self::KeyUp { .. } => None,
         }
     }
 }
@@ -195,6 +217,16 @@ extern "C" {
     ) -> *mut std::ffi::c_void;
     fn CGEventSetLocation(event: *mut std::ffi::c_void, location: CGPoint);
     fn CGEventSetIntegerValueField(event: *mut std::ffi::c_void, field: u32, value: i64);
+    fn CGEventCreateKeyboardEvent(
+        source: *const std::ffi::c_void,
+        virtualKey: u16,
+        keyDown: bool,
+    ) -> *mut std::ffi::c_void;
+    fn CGEventKeyboardSetUnicodeString(
+        event: *mut std::ffi::c_void,
+        stringLength: std::os::raw::c_ulong,
+        unicodeString: *const u16,
+    );
     fn CGEventPost(tap: CGEventTapLocation, event: *mut std::ffi::c_void);
 }
 
@@ -280,11 +312,14 @@ pub fn inject_remote_input(
             return Err("Accessibility permission not granted".to_string());
         }
 
-        let (norm_x, norm_y) = event.normalized_coords();
-        let (target_x, target_y) = map_normalized_coordinates(norm_x, norm_y, target);
-        let point = CGPoint {
-            x: target_x,
-            y: target_y,
+        let point = if let Some((norm_x, norm_y)) = event.normalized_coords() {
+            let (target_x, target_y) = map_normalized_coordinates(norm_x, norm_y, target);
+            CGPoint {
+                x: target_x,
+                y: target_y,
+            }
+        } else {
+            CGPoint { x: 0.0, y: 0.0 }
         };
 
         match event {
@@ -418,6 +453,18 @@ pub fn inject_remote_input(
                     }
                 }
             }
+            RemoteInputEvent::TextInput { text } => {
+                inject_unicode_text(text);
+            }
+            RemoteInputEvent::KeyClick { key, .. } => {
+                inject_key_click(key);
+            }
+            RemoteInputEvent::KeyDown { key, .. } => {
+                inject_key_state(key, true);
+            }
+            RemoteInputEvent::KeyUp { key, .. } => {
+                inject_key_state(key, false);
+            }
         }
 
         Ok(())
@@ -427,6 +474,83 @@ pub fn inject_remote_input(
     {
         let _ = (event, target);
         Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn key_name_to_macos_virtual_key(key: &str) -> Option<u16> {
+    match key {
+        "Return" | "Enter" => Some(36),      // 0x24
+        "Tab" => Some(48),                  // 0x30
+        "Space" | " " => Some(49),          // 0x31
+        "Backspace" | "Delete" => Some(51),  // 0x33
+        "Escape" => Some(53),               // 0x35
+        "ArrowLeft" | "Left" => Some(123),   // 0x7B
+        "ArrowRight" | "Right" => Some(124), // 0x7C
+        "ArrowDown" | "Down" => Some(125),   // 0x7D
+        "ArrowUp" | "Up" => Some(126),       // 0x7E
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn inject_unicode_text(text: &str) {
+    let utf16_chars: Vec<u16> = text.encode_utf16().collect();
+    if utf16_chars.is_empty() {
+        return;
+    }
+    for ch in utf16_chars {
+        let chars = [ch];
+        let down = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), 0, true) };
+        if !down.is_null() {
+            unsafe {
+                CGEventKeyboardSetUnicodeString(down, 1, chars.as_ptr());
+                CGEventPost(CGEventTapLocation::HIDEventTap, down);
+                CFRelease(down);
+            }
+        }
+        let up = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), 0, false) };
+        if !up.is_null() {
+            unsafe {
+                CGEventPost(CGEventTapLocation::HIDEventTap, up);
+                CFRelease(up);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn inject_key_click(key: &str) {
+    if let Some(vk) = key_name_to_macos_virtual_key(key) {
+        let down = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), vk, true) };
+        if !down.is_null() {
+            unsafe {
+                CGEventPost(CGEventTapLocation::HIDEventTap, down);
+                CFRelease(down);
+            }
+        }
+        let up = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), vk, false) };
+        if !up.is_null() {
+            unsafe {
+                CGEventPost(CGEventTapLocation::HIDEventTap, up);
+                CFRelease(up);
+            }
+        }
+    } else if key.chars().count() == 1 {
+        inject_unicode_text(key);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn inject_key_state(key: &str, is_down: bool) {
+    if let Some(vk) = key_name_to_macos_virtual_key(key) {
+        let event = unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), vk, is_down) };
+        if !event.is_null() {
+            unsafe {
+                CGEventPost(CGEventTapLocation::HIDEventTap, event);
+                CFRelease(event);
+            }
+        }
     }
 }
 
@@ -491,5 +615,32 @@ mod tests {
         let (x2, y2) = map_normalized_coordinates(0.0, 1.0, None);
         assert_eq!(x1, x2);
         assert_eq!(y1, y2);
+    }
+
+    #[test]
+    fn parses_text_input_event() {
+        let json = r#"{"action":"text_input","text":"你好 ScreenMirror 🚀"}"#;
+        let event = parse_remote_input(json).expect("should parse");
+        assert_eq!(
+            event,
+            RemoteInputEvent::TextInput {
+                text: "你好 ScreenMirror 🚀".to_string()
+            }
+        );
+        assert_eq!(event.normalized_coords(), None);
+    }
+
+    #[test]
+    fn parses_key_click_event() {
+        let json = r#"{"action":"key_click","key":"Backspace"}"#;
+        let event = parse_remote_input(json).expect("should parse");
+        assert_eq!(
+            event,
+            RemoteInputEvent::KeyClick {
+                key: "Backspace".to_string(),
+                modifiers: None,
+            }
+        );
+        assert_eq!(event.normalized_coords(), None);
     }
 }

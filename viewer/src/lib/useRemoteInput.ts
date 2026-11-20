@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch, type Ref } from 'vue';
+import { ref, onBeforeUnmount, watch, type Ref } from 'vue';
 import { clientToNormalized } from './coordinateMapping';
 import { useRemoteControl } from './remoteControl';
 
@@ -28,8 +28,21 @@ export function useRemoteInput(options: RemoteInputOptions) {
   let isDragging = false;
   let lastMoveTime = 0;
 
-  // Two-finger touch scroll state
+  // Two-finger touch scroll and pinch-zoom state
   let lastTwoFingerPos: { x: number; y: number } | null = null;
+  const zoomScale = ref<number>(1.0);
+  const panX = ref<number>(0);
+  const panY = ref<number>(0);
+
+  let initialPinchDist = 0;
+  let initialPinchScale = 1.0;
+  let isPinching = false;
+
+  function resetZoom() {
+    zoomScale.value = 1.0;
+    panX.value = 0;
+    panY.value = 0;
+  }
 
   function getContentDimensions(): { width: number; height: number } | null {
     const video = videoEl.value;
@@ -287,6 +300,9 @@ export function useRemoteInput(options: RemoteInputOptions) {
       const midX = (t0.clientX + t1.clientX) / 2;
       const midY = (t0.clientY + t1.clientY) / 2;
       lastTwoFingerPos = { x: midX, y: midY };
+      initialPinchDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+      initialPinchScale = zoomScale.value;
+      isPinching = false;
       e.preventDefault();
     }
   }
@@ -299,22 +315,41 @@ export function useRemoteInput(options: RemoteInputOptions) {
       const t1 = e.touches[1];
       const midX = (t0.clientX + t1.clientX) / 2;
       const midY = (t0.clientY + t1.clientY) / 2;
+      const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
 
-      // Note: delta is movement of fingers
-      const deltaX = (midX - lastTwoFingerPos.x) * 2.0;
-      const deltaY = (midY - lastTwoFingerPos.y) * 2.0;
-
+      const deltaX = midX - lastTwoFingerPos.x;
+      const deltaY = midY - lastTwoFingerPos.y;
       lastTwoFingerPos = { x: midX, y: midY };
 
-      const norm = getNormalized({ clientX: midX, clientY: midY });
-      if (norm) {
-        sendRemoteInput({
-          action: 'scroll',
-          x: norm.normX,
-          y: norm.normY,
-          delta_x: deltaX,
-          delta_y: deltaY,
-        });
+      const pinchRatio = initialPinchDist > 0 ? dist / initialPinchDist : 1.0;
+      if (!isPinching && Math.abs(pinchRatio - 1.0) > 0.06) {
+        isPinching = true;
+      }
+
+      if (isPinching) {
+        const targetScale = Math.min(4.0, Math.max(1.0, initialPinchScale * pinchRatio));
+        if (targetScale !== zoomScale.value) {
+          const scaleDiff = targetScale / zoomScale.value;
+          zoomScale.value = targetScale;
+          panX.value = midX - (midX - panX.value) * scaleDiff;
+          panY.value = midY - (midY - panY.value) * scaleDiff;
+        }
+      } else if (zoomScale.value > 1.05) {
+        // Pan the zoomed view
+        panX.value += deltaX;
+        panY.value += deltaY;
+      } else {
+        // Scroll macOS
+        const norm = getNormalized({ clientX: midX, clientY: midY });
+        if (norm) {
+          sendRemoteInput({
+            action: 'scroll',
+            x: norm.normX,
+            y: norm.normY,
+            delta_x: deltaX * 2.0,
+            delta_y: deltaY * 2.0,
+          });
+        }
       }
       e.preventDefault();
     }
@@ -324,6 +359,11 @@ export function useRemoteInput(options: RemoteInputOptions) {
     if (!touchControlEnabled.value) return;
     if (e.touches.length < 2) {
       lastTwoFingerPos = null;
+      initialPinchDist = 0;
+      isPinching = false;
+      if (zoomScale.value < 1.05) {
+        resetZoom();
+      }
     }
   }
 
@@ -331,6 +371,19 @@ export function useRemoteInput(options: RemoteInputOptions) {
 
   function onWheel(e: WheelEvent) {
     if (!touchControlEnabled.value) return;
+
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const targetScale = Math.min(4.0, Math.max(1.0, zoomScale.value * zoomFactor));
+      if (targetScale !== zoomScale.value) {
+        const scaleDiff = targetScale / zoomScale.value;
+        zoomScale.value = targetScale;
+        panX.value = e.clientX - (e.clientX - panX.value) * scaleDiff;
+        panY.value = e.clientY - (e.clientY - panY.value) * scaleDiff;
+      }
+      return;
+    }
 
     const norm = getNormalized(e);
     if (!norm || !norm.isInside) return;
@@ -414,5 +467,10 @@ export function useRemoteInput(options: RemoteInputOptions) {
 
   return {
     touchControlEnabled,
+    zoomScale,
+    panX,
+    panY,
+    resetZoom,
+    sendRemoteInput,
   };
 }

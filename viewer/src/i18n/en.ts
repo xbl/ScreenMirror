@@ -46,6 +46,10 @@ export default {
     enabled: 'Touch Control ON',
     disabled: 'Touch Control OFF',
     hint: 'Tap to click, long press for right click, two fingers to scroll',
+    keyboard: 'Keyboard',
+    keyboardOpen: 'Keyboard',
+    keyboardClose: 'Hide Keyboard',
+    resetZoom: 'Reset 1.0x',
   },
 };
 

@@ -46,5 +46,9 @@ export default {
     enabled: '触控已开启',
     disabled: '触控已关闭',
     hint: '单指点击左键，长按右键，双指滑动滚动',
+    keyboard: '键盘',
+    keyboardOpen: '键盘',
+    keyboardClose: '收起键盘',
+    resetZoom: '还原 1.0x',
   },
 };
