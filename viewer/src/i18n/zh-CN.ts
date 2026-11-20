@@ -38,6 +38,8 @@ export default {
     unmute: '开启声音',
     audioMuted: '声音已静音',
     audioUnmuted: '声音已开启',
+    fullscreen: '全屏',
+    exitFullscreen: '退出全屏',
   },
   remoteControl: {
     toggle: '触控控制',

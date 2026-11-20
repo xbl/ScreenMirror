@@ -38,6 +38,8 @@ export default {
     unmute: 'Unmute',
     audioMuted: 'Audio Muted',
     audioUnmuted: 'Audio Playing',
+    fullscreen: 'Fullscreen',
+    exitFullscreen: 'Exit Fullscreen',
   },
   remoteControl: {
     toggle: 'Touch Control',

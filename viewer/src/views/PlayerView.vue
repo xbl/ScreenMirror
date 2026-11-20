@@ -68,6 +68,25 @@
         </span>
         <span class="btn-label touch-label">{{ touchControlEnabled ? t('remoteControl.enabled') : t('remoteControl.disabled') }}</span>
       </button>
+
+      <button
+        type="button"
+        class="player-btn player-fullscreen-toggle"
+        :class="{ 'is-active': isFullscreen }"
+        :title="isFullscreen ? t('player.exitFullscreen') : t('player.fullscreen')"
+        :aria-label="isFullscreen ? t('player.exitFullscreen') : t('player.fullscreen')"
+        @click="toggleFullscreen"
+      >
+        <span class="btn-icon fullscreen-icon" aria-hidden="true">
+          <svg v-if="!isFullscreen" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+          </svg>
+        </span>
+        <span class="btn-label fullscreen-label">{{ isFullscreen ? t('player.exitFullscreen') : t('player.fullscreen') }}</span>
+      </button>
     </div>
 
     <div v-if="status !== 'streaming'" class="player-center">
@@ -322,18 +341,64 @@ function onVideoPause() {
   }
 }
 
-function toggleFullscreen() {
+const isFullscreen = ref(false);
+
+function updateFullscreenState() {
   if (typeof document === 'undefined') return;
-  if (!document.fullscreenElement) {
-    void document.documentElement.requestFullscreen?.().catch(() => {});
-  } else {
-    void document.exitFullscreen?.().catch(() => {});
+  isFullscreen.value = Boolean(
+    document.fullscreenElement || (document as any).webkitFullscreenElement,
+  );
+}
+
+const preventGesture = (e: Event) => e.preventDefault();
+
+async function toggleFullscreen() {
+  if (typeof document === 'undefined') return;
+  try {
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      const docEl = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (docEl.requestFullscreen) {
+        await docEl.requestFullscreen();
+      } else if (docEl.webkitRequestFullscreen) {
+        await docEl.webkitRequestFullscreen();
+      } else if ((videoEl.value as any)?.webkitEnterFullscreen) {
+        (videoEl.value as any).webkitEnterFullscreen();
+      }
+      // If mobile device, attempt to lock landscape orientation
+      if (typeof screen !== 'undefined' && screen.orientation && 'lock' in screen.orientation) {
+        try {
+          await (screen.orientation as any).lock('landscape');
+        } catch {
+          // ignore orientation lock error
+        }
+      }
+    } else {
+      const doc = document as Document & {
+        webkitExitFullscreen?: () => Promise<void>;
+      };
+      if (doc.exitFullscreen) {
+        await doc.exitFullscreen();
+      } else if (doc.webkitExitFullscreen) {
+        await doc.webkitExitFullscreen();
+      }
+      if (typeof screen !== 'undefined' && screen.orientation && 'unlock' in screen.orientation) {
+        try {
+          (screen.orientation as any).unlock();
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[player-view] toggleFullscreen error:', err);
+  } finally {
+    updateFullscreenState();
   }
 }
 
 function onVideoDblClick() {
   if (!touchControlEnabled.value) {
-    toggleFullscreen();
+    void toggleFullscreen();
   }
 }
 
@@ -506,6 +571,12 @@ onMounted(() => {
   window.addEventListener('viewer-stream', onStream);
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onVisibilityChange);
+    document.addEventListener('fullscreenchange', updateFullscreenState);
+    document.addEventListener('webkitfullscreenchange', updateFullscreenState);
+    document.addEventListener('gesturestart', preventGesture);
+    document.addEventListener('gesturechange', preventGesture);
+    document.addEventListener('gestureend', preventGesture);
+    updateFullscreenState();
   }
   startLiveEdgeChaser();
 
@@ -536,6 +607,11 @@ onBeforeUnmount(() => {
   void releaseWakeLock();
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', onVisibilityChange);
+    document.removeEventListener('fullscreenchange', updateFullscreenState);
+    document.removeEventListener('webkitfullscreenchange', updateFullscreenState);
+    document.removeEventListener('gesturestart', preventGesture);
+    document.removeEventListener('gesturechange', preventGesture);
+    document.removeEventListener('gestureend', preventGesture);
   }
   window.removeEventListener('viewer-stream', onStream);
   if (videoEl.value) videoEl.value.srcObject = null;
@@ -730,6 +806,35 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .player-streaming {
     transition: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .player-top-controls {
+    top: 10px;
+    right: 10px;
+    gap: 6px;
+  }
+  .player-streaming {
+    top: 10px;
+    left: 10px;
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .player-btn {
+    padding: 5px 9px;
+    font-size: 11px;
+    gap: 5px;
+  }
+}
+
+@media (max-width: 440px) {
+  .player-btn .btn-label {
+    display: none;
+  }
+  .player-btn {
+    padding: 7px;
+    border-radius: var(--radius-sm);
   }
 }
 </style>
