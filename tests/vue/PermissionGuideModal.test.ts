@@ -6,6 +6,7 @@ import PermissionGuideModal from '../../src/components/PermissionGuideModal.vue'
 const apiMocks = vi.hoisted(() => ({
   requestAndOpenScreenRecordingSettings: vi.fn(),
   checkScreenRecordingPermission: vi.fn(),
+  enumerateCaptureSources: vi.fn(),
 }));
 
 vi.mock('../../src/utils/api', () => ({ api: apiMocks }));

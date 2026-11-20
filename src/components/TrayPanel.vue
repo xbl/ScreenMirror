@@ -87,7 +87,18 @@ let unlistenTray: UnlistenFn | undefined;
 
 async function checkPermission() {
   try {
-    permissionGranted.value = await api.checkScreenRecordingPermission();
+    let granted = await api.checkScreenRecordingPermission();
+    if (!granted) {
+      try {
+        const sources = await api.enumerateCaptureSources();
+        if (sources.length > 0) {
+          granted = true;
+        }
+      } catch {
+        // keep false
+      }
+    }
+    permissionGranted.value = granted;
   } catch {
     /* best effort */
   }
@@ -96,6 +107,9 @@ async function checkPermission() {
 async function refreshState() {
   try {
     viewerCount.value = (await api.getConnectedDevices()).length;
+    if (!permissionGranted.value) {
+      void checkPermission();
+    }
   } catch {
     /* tolerate startup races while the host server comes up */
   }

@@ -4,7 +4,35 @@ pub fn check_screen_recording_permission() -> bool {
     extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
     }
-    unsafe { CGPreflightScreenCaptureAccess() }
+    if unsafe { CGPreflightScreenCaptureAccess() } {
+        return true;
+    }
+
+    // On macOS 15+ (Sequoia) and for ad-hoc / locally signed builds,
+    // CGPreflightScreenCaptureAccess() has a known bug returning false even after
+    // permission has been enabled in System Settings.
+    // As an authoritative fallback, check if we can inspect shareable windows
+    // from other processes (macOS strips titles & app names when denied).
+    can_read_windows_fallback()
+}
+
+#[cfg(target_os = "macos")]
+fn can_read_windows_fallback() -> bool {
+    if let Ok(windows) = xcap::Window::all() {
+        for w in windows {
+            if let Ok(title) = w.title() {
+                if !title.is_empty() {
+                    return true;
+                }
+            }
+            if let Ok(app_name) = w.app_name() {
+                if !app_name.is_empty() && app_name != "Window Server" {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(target_os = "macos")]

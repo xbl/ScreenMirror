@@ -89,7 +89,17 @@ async function handleRecheck() {
   rechecking.value = true;
   recheckMessage.value = '';
   try {
-    const granted = await api.checkScreenRecordingPermission();
+    let granted = await api.checkScreenRecordingPermission();
+    if (!granted) {
+      try {
+        const sources = await api.enumerateCaptureSources();
+        if (sources.length > 0) {
+          granted = true;
+        }
+      } catch {
+        // keep false
+      }
+    }
     if (granted) {
       isGranted.value = true;
       recheckMessage.value = t('permission.recheckSuccess');
