@@ -124,6 +124,36 @@ pub fn get_current_version(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<crate::updater::UpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+    crate::updater::check_for_updates(&current_version).await
+}
+
+#[tauri::command]
+pub async fn download_and_install_update(
+    app: AppHandle,
+    download_url: String,
+) -> Result<(), String> {
+    crate::updater::download_and_install_update(app, download_url).await
+}
+
+#[tauri::command]
+pub fn get_auto_check_update() -> bool {
+    Storage::open()
+        .ok()
+        .and_then(|s| s.get_string("autoCheckUpdate"))
+        .map(|v| v != "false")
+        .unwrap_or(true)
+}
+
+#[tauri::command]
+pub fn set_auto_check_update(enabled: bool) -> Result<(), String> {
+    let mut s = Storage::open().map_err(|e| e.to_string())?;
+    s.set_string("autoCheckUpdate", if enabled { "true" } else { "false" });
+    Ok(())
+}
+
+#[tauri::command]
 pub fn open_external_link(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)

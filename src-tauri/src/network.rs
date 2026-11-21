@@ -2,13 +2,12 @@ use if_addrs::{get_if_addrs, IfAddr};
 use std::net::Ipv4Addr;
 
 pub const IGNORED_INTERFACE_PREFIXES: &[&str] = &[
-    "bridge", "docker", "veth", "utun", "tun", "tap", "awdl", "llw", "gif", "stf", "ap",
-    "virbr", "vboxnet",
+    "bridge", "docker", "veth", "utun", "tun", "tap", "awdl", "llw", "gif", "stf", "ap", "virbr",
+    "vboxnet",
 ];
 
-pub const PREFERRED_INTERFACE_PREFIXES: &[&str] = &[
-    "en", "wlan", "wlp", "eth", "Wi-Fi", "WLAN", "Ethernet",
-];
+pub const PREFERRED_INTERFACE_PREFIXES: &[&str] =
+    &["en", "wlan", "wlp", "eth", "Wi-Fi", "WLAN", "Ethernet"];
 
 #[inline]
 pub fn is_ignored_interface(name: &str) -> bool {

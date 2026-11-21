@@ -20,7 +20,10 @@ pub fn extract_pcm_from_sample_buffer(
     }
 
     let format_desc = sample.format_description();
-    let is_float = format_desc.as_ref().map(|f| f.audio_is_float()).unwrap_or(true);
+    let is_float = format_desc
+        .as_ref()
+        .map(|f| f.audio_is_float())
+        .unwrap_or(true);
     let sample_rate = format_desc
         .as_ref()
         .and_then(|f| f.audio_sample_rate())

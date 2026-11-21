@@ -347,17 +347,26 @@ async fn handle_socket(
                             if let Some(os) = parsed.payload.get("os").and_then(Value::as_str) {
                                 viewer_os = os.to_string();
                             }
-                            if let Some(browser) = parsed.payload.get("browser").and_then(Value::as_str)
+                            if let Some(browser) =
+                                parsed.payload.get("browser").and_then(Value::as_str)
                             {
                                 viewer_browser = browser.to_string();
                             }
-                            if let Some(w) = parsed.payload.get("screenWidth").and_then(Value::as_u64) {
+                            if let Some(w) =
+                                parsed.payload.get("screenWidth").and_then(Value::as_u64)
+                            {
                                 viewer_screen_width = Some(w as u32);
                             }
-                            if let Some(h) = parsed.payload.get("screenHeight").and_then(Value::as_u64) {
+                            if let Some(h) =
+                                parsed.payload.get("screenHeight").and_then(Value::as_u64)
+                            {
                                 viewer_screen_height = Some(h as u32);
                             }
-                            if let Some(dpr) = parsed.payload.get("devicePixelRatio").and_then(Value::as_f64) {
+                            if let Some(dpr) = parsed
+                                .payload
+                                .get("devicePixelRatio")
+                                .and_then(Value::as_f64)
+                            {
                                 viewer_dpr = Some(dpr);
                             }
                             viewer_max_dimension = parsed
@@ -365,7 +374,8 @@ async fn handle_socket(
                                 .get("maxVideoDimension")
                                 .and_then(Value::as_u64)
                                 .unwrap_or(1920)
-                                .clamp(640, 3840) as u32;
+                                .clamp(640, 3840)
+                                as u32;
                         }
                         "OFFER" => {
                             tracing::info!(
@@ -487,15 +497,23 @@ async fn handle_socket(
                             tracing::debug!("received trickle ICE candidate; candidates are gathered in the SDP offer");
                         }
                         "REMOTE_INPUT" => {
-                            let event_opt = serde_json::from_value::<crate::input::RemoteInputEvent>(parsed.payload.clone())
+                            let event_opt =
+                                serde_json::from_value::<crate::input::RemoteInputEvent>(
+                                    parsed.payload.clone(),
+                                )
                                 .ok()
                                 .or_else(|| {
-                                    crate::input::parse_remote_input(&parsed.payload.to_string()).ok()
+                                    crate::input::parse_remote_input(&parsed.payload.to_string())
+                                        .ok()
                                 });
                             if let Some(event) = event_opt {
                                 let target = state.capture_target.lock().clone();
-                                if let Err(err) = crate::input::inject_remote_input(&event, target.as_ref()) {
-                                    tracing::debug!("failed to inject remote input from WebSocket: {err}");
+                                if let Err(err) =
+                                    crate::input::inject_remote_input(&event, target.as_ref())
+                                {
+                                    tracing::debug!(
+                                        "failed to inject remote input from WebSocket: {err}"
+                                    );
                                 }
                             }
                         }

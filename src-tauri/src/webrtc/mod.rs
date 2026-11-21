@@ -20,7 +20,9 @@ pub mod video_toolbox_iosurface;
 #[cfg(not(feature = "screenkit"))]
 pub mod video_toolbox_native;
 
-pub use audio_encoder::{AudioEncodedFrame, AudioEncoder, AudioFrameSink, generate_synthetic_audio_frame};
+pub use audio_encoder::{
+    generate_synthetic_audio_frame, AudioEncodedFrame, AudioEncoder, AudioFrameSink,
+};
 pub use host::{HostPeer, SharedCapture};
 pub use screencapturekit_capture::{
     start_screen_capture, ScreenKitCapture, ScreenKitError, ScreenKitFrame,
@@ -318,10 +320,7 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
         let mut out = Vec::new();
         let active_virtual_ids = crate::virtual_display::get_active_ids();
         let mut screen_index = 0;
-        for m in Monitor::all()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-        {
+        for m in Monitor::all().map_err(|e| e.to_string())?.into_iter() {
             let id = m.id().ok();
             if let Some(id_num) = id {
                 if crate::virtual_display::is_destroyed_or_stale(id_num) {
@@ -333,7 +332,10 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 .map(|id_val| active_virtual_ids.contains(&id_val))
                 .unwrap_or(false);
             let source_id = m.id().map(|id| id.to_string()).map_err(|error| {
-                format!("failed to read display ID for screen {}: {error}", screen_index + 1)
+                format!(
+                    "failed to read display ID for screen {}: {error}",
+                    screen_index + 1
+                )
             })?;
             let width = m.width().unwrap_or(0);
             let height = m.height().unwrap_or(0);
@@ -341,7 +343,9 @@ pub fn enumerate_sources() -> Result<Vec<CaptureSourceInfo>, String> {
                 id: legacy_capture_source_id("screen", screen_index),
                 preview: None,
                 source_id,
-                name: m.name().unwrap_or_else(|_| format!("Display {}", screen_index + 1)),
+                name: m
+                    .name()
+                    .unwrap_or_else(|_| format!("Display {}", screen_index + 1)),
                 kind: "screen".into(),
                 is_primary: m.is_primary().unwrap_or(false),
                 width,
@@ -428,10 +432,14 @@ pub fn get_capture_source_preview(
                             .capture_image()
                             .map_err(|error| error.to_string())
                             .and_then(|image| {
-                                let rgba = RgbaImage::from_raw(image.width(), image.height(), image.into_raw())
-                                    .ok_or_else(|| {
-                                        String::from("window preview has invalid image dimensions")
-                                    })?;
+                                let rgba = RgbaImage::from_raw(
+                                    image.width(),
+                                    image.height(),
+                                    image.into_raw(),
+                                )
+                                .ok_or_else(|| {
+                                    String::from("window preview has invalid image dimensions")
+                                })?;
                                 if !is_visible_preview(&rgba) {
                                     return Err(String::from("window preview is blank or black"));
                                 }

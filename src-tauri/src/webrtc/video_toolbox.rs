@@ -200,7 +200,8 @@ impl VideoEncoder {
             captured_at,
         };
         self.inner.encode(&frame).map_err(|error| error.to_string())
-    }}
+    }
+}
 
 #[cfg(test)]
 mod tests {

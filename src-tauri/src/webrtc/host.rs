@@ -103,7 +103,10 @@ mod tests {
         let t2 = start + Duration::from_millis(1033);
         let ts2 = calculate_rtp_timestamp(start, t2, ts1);
         assert_eq!(ts2, 92970);
-        assert!(ts2 > ts1 + 3000, "RTP timestamp must track real wall-clock elapsed time across static gaps");
+        assert!(
+            ts2 > ts1 + 3000,
+            "RTP timestamp must track real wall-clock elapsed time across static gaps"
+        );
 
         // Monotonicity check even if clock does not advance
         let ts3 = calculate_rtp_timestamp(start, t2, ts2);
@@ -263,7 +266,10 @@ mod tests {
         let t2 = start + Duration::from_millis(1020);
         let ts2 = calculate_audio_rtp_timestamp(start, t2, ts1);
         assert_eq!(ts2, 48960);
-        assert!(ts2 > ts1 + 40000, "Audio RTP timestamp tracks real wallclock elapsed time across gaps");
+        assert!(
+            ts2 > ts1 + 40000,
+            "Audio RTP timestamp tracks real wallclock elapsed time across gaps"
+        );
 
         // Monotonicity check even if clock does not advance
         let ts3 = calculate_audio_rtp_timestamp(start, t2, ts2);
@@ -298,7 +304,11 @@ mod tests {
         };
         shared.deliver_audio(frame);
 
-        let dequeued = peer.audio_rx.lock().try_recv().expect("audio frame arrived");
+        let dequeued = peer
+            .audio_rx
+            .lock()
+            .try_recv()
+            .expect("audio frame arrived");
         assert_eq!(dequeued.data, vec![1, 2, 3]);
         assert_eq!(dequeued.timestamp_samples, 960);
     }
@@ -410,7 +420,12 @@ impl SharedCapture {
                 shared.deliver_audio(frame);
             }
         });
-        *handle = Some(spawn_video_capture_loop(target, fps, sink, Some(audio_sink)));
+        *handle = Some(spawn_video_capture_loop(
+            target,
+            fps,
+            sink,
+            Some(audio_sink),
+        ));
     }
 
     pub fn switch_target(self: &Arc<Self>, target: CaptureTarget, fps: u32) -> Result<(), String> {
@@ -484,11 +499,7 @@ fn advance_rtp_timestamp(timestamp: i64, fps: u32) -> i64 {
     timestamp.wrapping_add(90_000 / i64::from(fps.max(1)))
 }
 
-pub fn calculate_rtp_timestamp(
-    start: Instant,
-    captured_at: Instant,
-    last_timestamp: i64,
-) -> i64 {
+pub fn calculate_rtp_timestamp(start: Instant, captured_at: Instant, last_timestamp: i64) -> i64 {
     let elapsed = captured_at.saturating_duration_since(start);
     // 90 kHz RTP clock: 90 ticks per millisecond = 90_000 ticks per second
     let pts = (elapsed.as_micros() as u64 * 90 / 1_000) as i64;
@@ -1094,15 +1105,23 @@ async fn drain_rtc(
                 shared_capture.request_keyframe();
             }
             Ok(Output::Event(Event::ChannelOpen(channel_id, label))) => {
-                tracing::info!("host: DataChannel opened: id={:?} label={}", channel_id, label);
+                tracing::info!(
+                    "host: DataChannel opened: id={:?} label={}",
+                    channel_id,
+                    label
+                );
             }
             Ok(Output::Event(Event::ChannelData(data))) => {
                 if let Ok(text) = std::str::from_utf8(&data.data) {
                     match crate::input::parse_remote_input(text) {
                         Ok(event) => {
                             let target = peer_for_subscription.active_target.lock().clone();
-                            if let Err(err) = crate::input::inject_remote_input(&event, target.as_ref()) {
-                                tracing::debug!("failed to inject remote input from DataChannel: {err}");
+                            if let Err(err) =
+                                crate::input::inject_remote_input(&event, target.as_ref())
+                            {
+                                tracing::debug!(
+                                    "failed to inject remote input from DataChannel: {err}"
+                                );
                             }
                         }
                         Err(err) => {
@@ -1155,12 +1174,7 @@ fn write_audio_frame(
             let start = stream_start.get_or_insert(frame.captured_at);
             let rtp_ts = calculate_audio_rtp_timestamp(*start, frame.captured_at, *last_timestamp);
             *last_timestamp = rtp_ts;
-            if let Err(error) = writer.write(
-                pt,
-                now,
-                MediaTime::new(rtp_ts, 48_000),
-                frame.data,
-            ) {
+            if let Err(error) = writer.write(pt, now, MediaTime::new(rtp_ts, 48_000), frame.data) {
                 tracing::warn!("host: Opus audio writer failed: {error}");
                 return false;
             }
@@ -1227,12 +1241,7 @@ fn write_video_frame(
             let start = stream_start.get_or_insert(frame.captured_at);
             let rtp_ts = calculate_rtp_timestamp(*start, frame.captured_at, *last_timestamp);
             *last_timestamp = rtp_ts;
-            if let Err(error) = writer.write(
-                pt,
-                now,
-                MediaTime::new(rtp_ts, 90_000),
-                frame.data,
-            ) {
+            if let Err(error) = writer.write(pt, now, MediaTime::new(rtp_ts, 90_000), frame.data) {
                 tracing::warn!("host: H.264 writer failed: {error}");
                 return false;
             }

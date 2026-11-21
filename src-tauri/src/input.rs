@@ -122,8 +122,13 @@ pub fn parse_remote_input(text: &str) -> Result<RemoteInputEvent, String> {
         if let Some(msg_type) = value.get("type").and_then(|v| v.as_str()) {
             let mut val_clone = value.clone();
             if let Some(map) = val_clone.as_object_mut() {
-                map.insert("action".into(), serde_json::Value::String(msg_type.to_lowercase()));
-                if let Ok(event) = serde_json::from_value::<RemoteInputEvent>(serde_json::Value::Object(map.clone())) {
+                map.insert(
+                    "action".into(),
+                    serde_json::Value::String(msg_type.to_lowercase()),
+                );
+                if let Ok(event) = serde_json::from_value::<RemoteInputEvent>(
+                    serde_json::Value::Object(map.clone()),
+                ) {
                     return Ok(event);
                 }
             }
@@ -264,8 +269,13 @@ pub fn map_normalized_coordinates(
                 if let Some(ref source_id) = target.source_id {
                     if let Ok(target_wid) = source_id.parse::<u32>() {
                         if let Ok(windows) = xcap::Window::all() {
-                            if let Some(w) = windows.into_iter().find(|w| w.id().ok() == Some(target_wid)) {
-                                if let (Ok(x), Ok(y), Ok(width), Ok(height)) = (w.x(), w.y(), w.width(), w.height()) {
+                            if let Some(w) = windows
+                                .into_iter()
+                                .find(|w| w.id().ok() == Some(target_wid))
+                            {
+                                if let (Ok(x), Ok(y), Ok(width), Ok(height)) =
+                                    (w.x(), w.y(), w.width(), w.height())
+                                {
                                     if width > 0 && height > 0 {
                                         return (
                                             x as f64 + clamped_x * width as f64,
@@ -339,19 +349,18 @@ pub fn inject_remote_input(
                     }
                 }
             }
-            RemoteInputEvent::MouseDown { button, click_count, .. } => {
+            RemoteInputEvent::MouseDown {
+                button,
+                click_count,
+                ..
+            } => {
                 let (event_type, mouse_button) = match button {
                     MouseButton::Left => (CGEventType::LeftMouseDown, CGMouseButton::Left),
                     MouseButton::Right => (CGEventType::RightMouseDown, CGMouseButton::Right),
                     MouseButton::Middle => (CGEventType::OtherMouseDown, CGMouseButton::Center),
                 };
                 let cg_event = unsafe {
-                    CGEventCreateMouseEvent(
-                        std::ptr::null(),
-                        event_type,
-                        point,
-                        mouse_button,
-                    )
+                    CGEventCreateMouseEvent(std::ptr::null(), event_type, point, mouse_button)
                 };
                 if !cg_event.is_null() {
                     unsafe {
@@ -361,19 +370,18 @@ pub fn inject_remote_input(
                     }
                 }
             }
-            RemoteInputEvent::MouseUp { button, click_count, .. } => {
+            RemoteInputEvent::MouseUp {
+                button,
+                click_count,
+                ..
+            } => {
                 let (event_type, mouse_button) = match button {
                     MouseButton::Left => (CGEventType::LeftMouseUp, CGMouseButton::Left),
                     MouseButton::Right => (CGEventType::RightMouseUp, CGMouseButton::Right),
                     MouseButton::Middle => (CGEventType::OtherMouseUp, CGMouseButton::Center),
                 };
                 let cg_event = unsafe {
-                    CGEventCreateMouseEvent(
-                        std::ptr::null(),
-                        event_type,
-                        point,
-                        mouse_button,
-                    )
+                    CGEventCreateMouseEvent(std::ptr::null(), event_type, point, mouse_button)
                 };
                 if !cg_event.is_null() {
                     unsafe {
@@ -383,11 +391,27 @@ pub fn inject_remote_input(
                     }
                 }
             }
-            RemoteInputEvent::MouseClick { button, click_count, .. } => {
+            RemoteInputEvent::MouseClick {
+                button,
+                click_count,
+                ..
+            } => {
                 let (down_type, up_type, mouse_button) = match button {
-                    MouseButton::Left => (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left),
-                    MouseButton::Right => (CGEventType::RightMouseDown, CGEventType::RightMouseUp, CGMouseButton::Right),
-                    MouseButton::Middle => (CGEventType::OtherMouseDown, CGEventType::OtherMouseUp, CGMouseButton::Center),
+                    MouseButton::Left => (
+                        CGEventType::LeftMouseDown,
+                        CGEventType::LeftMouseUp,
+                        CGMouseButton::Left,
+                    ),
+                    MouseButton::Right => (
+                        CGEventType::RightMouseDown,
+                        CGEventType::RightMouseUp,
+                        CGMouseButton::Right,
+                    ),
+                    MouseButton::Middle => (
+                        CGEventType::OtherMouseDown,
+                        CGEventType::OtherMouseUp,
+                        CGMouseButton::Center,
+                    ),
                 };
                 let down_event = unsafe {
                     CGEventCreateMouseEvent(std::ptr::null(), down_type, point, mouse_button)
@@ -417,12 +441,7 @@ pub fn inject_remote_input(
                     MouseButton::Middle => (CGEventType::OtherMouseDragged, CGMouseButton::Center),
                 };
                 let cg_event = unsafe {
-                    CGEventCreateMouseEvent(
-                        std::ptr::null(),
-                        event_type,
-                        point,
-                        mouse_button,
-                    )
+                    CGEventCreateMouseEvent(std::ptr::null(), event_type, point, mouse_button)
                 };
                 if !cg_event.is_null() {
                     unsafe {
@@ -431,7 +450,9 @@ pub fn inject_remote_input(
                     }
                 }
             }
-            RemoteInputEvent::Scroll { delta_x, delta_y, .. } => {
+            RemoteInputEvent::Scroll {
+                delta_x, delta_y, ..
+            } => {
                 // In macOS Natural Scrolling, positive vertical delta scrolls down.
                 let dy = (-delta_y) as i32;
                 let dx = (-delta_x) as i32;
@@ -481,10 +502,10 @@ pub fn inject_remote_input(
 fn key_name_to_macos_virtual_key(key: &str) -> Option<u16> {
     match key {
         "Return" | "Enter" => Some(36),      // 0x24
-        "Tab" => Some(48),                  // 0x30
-        "Space" | " " => Some(49),          // 0x31
+        "Tab" => Some(48),                   // 0x30
+        "Space" | " " => Some(49),           // 0x31
         "Backspace" | "Delete" => Some(51),  // 0x33
-        "Escape" => Some(53),               // 0x35
+        "Escape" => Some(53),                // 0x35
         "ArrowLeft" | "Left" => Some(123),   // 0x7B
         "ArrowRight" | "Right" => Some(124), // 0x7C
         "ArrowDown" | "Down" => Some(125),   // 0x7D

@@ -73,7 +73,11 @@ impl AudioEncoder {
     }
 
     /// Push interleaved 48kHz stereo f32 samples and encode any full 20ms frames.
-    pub fn push_pcm_and_encode<F>(&mut self, samples: &[f32], mut on_frame: F) -> Result<(), AudioEncoderError>
+    pub fn push_pcm_and_encode<F>(
+        &mut self,
+        samples: &[f32],
+        mut on_frame: F,
+    ) -> Result<(), AudioEncoderError>
     where
         F: FnMut(AudioEncodedFrame),
     {
@@ -86,7 +90,10 @@ impl AudioEncoder {
             // Round excess to full stereo samples (multiple of 2)
             let excess = (excess / OPUS_CHANNELS) * OPUS_CHANNELS;
             self.pcm_accumulator.drain(..excess);
-            tracing::debug!("Audio accumulator pruned {} stale samples to protect interactive latency", excess);
+            tracing::debug!(
+                "Audio accumulator pruned {} stale samples to protect interactive latency",
+                excess
+            );
         }
 
         // Process all complete 20ms frames (1920 samples)
@@ -118,11 +125,7 @@ impl AudioEncoder {
 }
 
 /// Convert arbitrary sample-rate / channel PCM to 48kHz stereo interleaved f32.
-pub fn resample_and_interleave(
-    left: &[f32],
-    right: Option<&[f32]>,
-    source_rate: u32,
-) -> Vec<f32> {
+pub fn resample_and_interleave(left: &[f32], right: Option<&[f32]>, source_rate: u32) -> Vec<f32> {
     if left.is_empty() {
         return Vec::new();
     }
@@ -142,7 +145,8 @@ pub fn resample_and_interleave(
     }
 
     // Linear resampling to 48kHz
-    let target_frames = ((source_frames as u64 * OPUS_SAMPLE_RATE as u64) / source_rate.max(1) as u64) as usize;
+    let target_frames =
+        ((source_frames as u64 * OPUS_SAMPLE_RATE as u64) / source_rate.max(1) as u64) as usize;
     let mut out = Vec::with_capacity(target_frames * OPUS_CHANNELS);
 
     let ratio = source_rate as f64 / OPUS_SAMPLE_RATE as f64;
@@ -156,7 +160,11 @@ pub fn resample_and_interleave(
         let l1 = left[idx1];
         let l = l0 + (l1 - l0) * frac;
 
-        let r0 = if has_right { right_channel[idx0.min(source_frames - 1)] } else { l0 };
+        let r0 = if has_right {
+            right_channel[idx0.min(source_frames - 1)]
+        } else {
+            l0
+        };
         let r1 = if has_right { right_channel[idx1] } else { l1 };
         let r = r0 + (r1 - r0) * frac;
 
@@ -201,7 +209,10 @@ mod tests {
         assert_eq!(frames.len(), 1, "exactly one 20ms frame should be emitted");
         assert_eq!(frames[0].timestamp_samples, 960);
         assert!(!frames[0].data.is_empty(), "Opus packet must not be empty");
-        assert!(frames[0].data.len() <= 1275, "Opus packet size within bounds");
+        assert!(
+            frames[0].data.len() <= 1275,
+            "Opus packet size within bounds"
+        );
     }
 
     #[test]

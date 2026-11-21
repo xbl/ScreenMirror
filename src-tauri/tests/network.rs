@@ -53,11 +53,11 @@ fn test_is_valid_lan_ipv4() {
 #[test]
 fn test_select_best_lan_ip_ranking() {
     let ifaces = vec![
-        ("utun4", Ipv4Addr::new(10, 8, 0, 2)),          // VPN - ignored
-        ("en0", Ipv4Addr::new(169, 254, 5, 5)),         // link-local - ignored
-        ("awdl0", Ipv4Addr::new(192, 168, 99, 1)),      // macOS peer-to-peer - ignored
-        ("other0", Ipv4Addr::new(10, 0, 0, 2)),         // non-preferred private (rank 3)
-        ("en1", Ipv4Addr::new(192, 168, 1, 50)),        // preferred private (rank 4)
+        ("utun4", Ipv4Addr::new(10, 8, 0, 2)),     // VPN - ignored
+        ("en0", Ipv4Addr::new(169, 254, 5, 5)),    // link-local - ignored
+        ("awdl0", Ipv4Addr::new(192, 168, 99, 1)), // macOS peer-to-peer - ignored
+        ("other0", Ipv4Addr::new(10, 0, 0, 2)),    // non-preferred private (rank 3)
+        ("en1", Ipv4Addr::new(192, 168, 1, 50)),   // preferred private (rank 4)
     ];
 
     let chosen = select_best_lan_ip(ifaces.into_iter());

@@ -88,7 +88,9 @@ pub fn request_accessibility_permission() -> bool {
     let key = CFString::new("AXTrustedCheckOptionPrompt");
     let value = CFBoolean::true_value();
     let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
-    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const std::ffi::c_void) }
+    unsafe {
+        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const std::ffi::c_void)
+    }
 }
 
 #[cfg(target_os = "macos")]

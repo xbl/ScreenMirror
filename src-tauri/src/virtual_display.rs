@@ -54,8 +54,16 @@ mod native {
             .unwrap_or_else(|| "ScreenMirror Extended Display".into());
         let c_name = CString::new(name_str).map_err(|e| e.to_string())?;
 
-        let width = if config.width == 0 { 1920 } else { config.width };
-        let height = if config.height == 0 { 1080 } else { config.height };
+        let width = if config.width == 0 {
+            1920
+        } else {
+            config.width
+        };
+        let height = if config.height == 0 {
+            1080
+        } else {
+            config.height
+        };
         let refresh_rate = config.refresh_rate.unwrap_or(60.0);
         let hi_dpi = if config.hi_dpi.unwrap_or(true) { 1 } else { 0 };
 
@@ -75,7 +83,9 @@ mod native {
         if destroyed {
             Ok(())
         } else {
-            Err(format!("Virtual display {display_id} not found or already destroyed"))
+            Err(format!(
+                "Virtual display {display_id} not found or already destroyed"
+            ))
         }
     }
 
@@ -154,7 +164,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn test_virtual_display_support_and_lifecycle() {
         if !is_supported() {
-            println!("CGVirtualDisplay not supported in this test environment, skipping lifecycle test");
+            println!(
+                "CGVirtualDisplay not supported in this test environment, skipping lifecycle test"
+            );
             return;
         }
 

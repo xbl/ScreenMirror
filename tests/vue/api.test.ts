@@ -10,5 +10,9 @@ describe('api', () => {
     expect(typeof api.startSharing).toBe('function');
     expect(typeof api.checkScreenRecordingPermission).toBe('function');
     expect(typeof api.requestAndOpenScreenRecordingSettings).toBe('function');
+    expect(typeof api.checkForUpdates).toBe('function');
+    expect(typeof api.downloadAndInstallUpdate).toBe('function');
+    expect(typeof api.getAutoCheckUpdate).toBe('function');
+    expect(typeof api.setAutoCheckUpdate).toBe('function');
   });
 });

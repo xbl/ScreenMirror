@@ -237,12 +237,17 @@ pub fn start_screen_capture(
             return;
         }
         if let Some(status) = sample.frame_status() {
-            if matches!(status, SCFrameStatus::Suspended | SCFrameStatus::Blank | SCFrameStatus::Stopped) {
+            if matches!(
+                status,
+                SCFrameStatus::Suspended | SCFrameStatus::Blank | SCFrameStatus::Stopped
+            ) {
                 return;
             }
             // Allow the initial frame through even if status is Idle, so the encoder
             // can seed and start emitting frames on a static screen.
-            if matches!(status, SCFrameStatus::Idle) && has_delivered_frame_handler.load(Ordering::Acquire) {
+            if matches!(status, SCFrameStatus::Idle)
+                && has_delivered_frame_handler.load(Ordering::Acquire)
+            {
                 return;
             }
         }
@@ -317,8 +322,9 @@ pub fn start_screen_capture(
         let audio_encoder_for_handler = audio_encoder.clone();
         let stopped_for_audio = stopped.clone();
         let audio_handler = move |sample: screencapturekit::cm::CMSampleBuffer,
-                                 output_type: SCStreamOutputType| {
-            if output_type != SCStreamOutputType::Audio || stopped_for_audio.load(Ordering::Acquire) {
+                                  output_type: SCStreamOutputType| {
+            if output_type != SCStreamOutputType::Audio || stopped_for_audio.load(Ordering::Acquire)
+            {
                 return;
             }
             if let Ok(mut guard) = audio_encoder_for_handler.try_lock() {

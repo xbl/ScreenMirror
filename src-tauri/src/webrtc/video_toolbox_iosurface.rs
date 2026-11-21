@@ -61,7 +61,9 @@ mod native {
                 if let Err(e) = res {
                     // kVTPropertyNotSupportedErr (-12900) is returned when the hardware
                     // encoder enforces real-time zero delay via RealTime + AllowFrameReordering=false.
-                    tracing::debug!("kVTCompressionPropertyKey_MaxFrameDelayCount not supported or failed: {e}");
+                    tracing::debug!(
+                        "kVTCompressionPropertyKey_MaxFrameDelayCount not supported or failed: {e}"
+                    );
                 }
             }
 
@@ -159,8 +161,11 @@ mod native {
         /// The natural GOP interval already guarantees an IDR every 1.0 second.
         pub fn force_keyframe(&mut self) {
             let now = std::time::Instant::now();
-            if now.duration_since(self.last_keyframe_time) < std::time::Duration::from_millis(1000) {
-                tracing::debug!("throttling forced keyframe rebuild; natural GOP will refresh shortly");
+            if now.duration_since(self.last_keyframe_time) < std::time::Duration::from_millis(1000)
+            {
+                tracing::debug!(
+                    "throttling forced keyframe rebuild; natural GOP will refresh shortly"
+                );
                 return;
             }
             match build_session(self.width, self.height, self.fps, self.bitrate_kbps) {
@@ -190,7 +195,10 @@ mod native {
                     frame.width, frame.height, self.width, self.height
                 )));
             }
-            let pts_ms = frame.captured_at.duration_since(self.pts_origin).as_millis() as i64;
+            let pts_ms = frame
+                .captured_at
+                .duration_since(self.pts_origin)
+                .as_millis() as i64;
             self.pts = self.pts.saturating_add(1).max(pts_ms);
             let presentation_time = (self.pts, 1000);
             let encoded = if let Some(surface) = frame.iosurface.as_ref() {
@@ -422,6 +430,10 @@ mod tests {
     fn screenkit_build_reports_available() {
         assert!(is_available());
         let encoder = IOSurfaceVideoEncoder::new(320, 240, 30, 500);
-        assert!(encoder.is_ok(), "failed to create encoder: {:?}", encoder.err());
+        assert!(
+            encoder.is_ok(),
+            "failed to create encoder: {:?}",
+            encoder.err()
+        );
     }
 }

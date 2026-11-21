@@ -28,11 +28,13 @@ export const api = {
   checkScreenRecordingPermission: () => invoke<boolean>('check_screen_recording_permission'),
   requestScreenRecordingPermission: () => invoke<boolean>('request_screen_recording_permission'),
   openScreenRecordingSettings: () => invoke<void>('open_screen_recording_settings'),
-  requestAndOpenScreenRecordingSettings: () => invoke<void>('request_and_open_screen_recording_settings'),
+  requestAndOpenScreenRecordingSettings: () =>
+    invoke<void>('request_and_open_screen_recording_settings'),
   checkAccessibilityPermission: () => invoke<boolean>('check_accessibility_permission'),
   requestAccessibilityPermission: () => invoke<boolean>('request_accessibility_permission'),
   openAccessibilitySettings: () => invoke<void>('open_accessibility_settings'),
-  requestAndOpenAccessibilitySettings: () => invoke<void>('request_and_open_accessibility_settings'),
+  requestAndOpenAccessibilitySettings: () =>
+    invoke<void>('request_and_open_accessibility_settings'),
   getPort: () => invoke<number>('get_port'),
   getAppLanguage: () => invoke<string>('get_app_language'),
   setAppLanguage: (lang: string) => invoke<void>('set_app_language', { lang }),
@@ -47,21 +49,24 @@ export const api = {
   isViewerSlotAvailable: () => invoke<boolean>('is_viewer_slot_available'),
   createWaitingSession: (roomId?: string) => invoke<string>('create_waiting_session', { roomId }),
   resetWaitingSession: () => invoke<void>('reset_waiting_session'),
-  setDesktopCapturerSourceId: (id: string) => invoke<void>('set_desktop_capturer_source_id', { id }),
+  setDesktopCapturerSourceId: (id: string) =>
+    invoke<void>('set_desktop_capturer_source_id', { id }),
   getWaitingSourceId: () => invoke<string | null>('get_waiting_source_id'),
   startSharing: () => invoke<void>('start_sharing'),
   getPendingDevice: () => invoke<Device | null>('get_pending_device'),
   setDeviceConnectedStatus: () => invoke<void>('set_device_connected_status'),
   enumerateCaptureSources: () => invoke<CaptureSourceInfo[]>('enumerate_capture_sources'),
-  getCaptureSourcePreview: (sourceId: string, forceRefresh: boolean, sourceKind: CaptureSourceKind) =>
-    invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh, sourceKind }),
+  getCaptureSourcePreview: (
+    sourceId: string,
+    forceRefresh: boolean,
+    sourceKind: CaptureSourceKind,
+  ) => invoke<string | null>('get_capture_source_preview', { sourceId, forceRefresh, sourceKind }),
   getCaptureTarget: () => invoke<CaptureTargetState | null>('get_capture_target'),
   openSourcePickerWindow: () => invoke<void>('open_source_picker_window'),
   closeSourcePickerWindow: () => invoke<void>('close_source_picker_window'),
   startSourcePickerDrag: () => invoke<void>('start_source_picker_drag'),
   closeTrayPanel: () => invoke<void>('close_tray_panel'),
-  setCaptureTarget: (args: CaptureTarget) =>
-    invoke<void>('set_capture_target', { args }),
+  setCaptureTarget: (args: CaptureTarget) => invoke<void>('set_capture_target', { args }),
   isVirtualDisplaySupported: () => invoke<boolean>('is_virtual_display_supported'),
   createVirtualDisplay: (config: VirtualDisplayConfig) =>
     invoke<number>('create_virtual_display', { config }),
@@ -69,6 +74,31 @@ export const api = {
     invoke<void>('destroy_virtual_display', { displayId }),
   destroyAllVirtualDisplays: () => invoke<void>('destroy_all_virtual_displays'),
   getActiveVirtualDisplays: () => invoke<number[]>('get_active_virtual_displays'),
+  checkForUpdates: () => invoke<UpdateInfo>('check_for_updates'),
+  downloadAndInstallUpdate: (downloadUrl: string) =>
+    invoke<void>('download_and_install_update', { downloadUrl }),
+  getAutoCheckUpdate: () => invoke<boolean>('get_auto_check_update'),
+  setAutoCheckUpdate: (enabled: boolean) => invoke<void>('set_auto_check_update', { enabled }),
+};
+
+export type UpdateInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseNotes: string | null;
+  releaseUrl: string;
+  publishedAt: string | null;
+  downloadUrl: string | null;
+  assetName: string | null;
+  assetSize: number | null;
+};
+
+export type DownloadProgress = {
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number;
+  status: 'downloading' | 'extracting' | 'ready' | 'error';
+  message: string | null;
 };
 
 export type VirtualDisplayConfig = {

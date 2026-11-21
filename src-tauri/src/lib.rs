@@ -111,6 +111,7 @@ pub mod network;
 pub mod permissions;
 pub mod signaling;
 pub(crate) mod storage;
+pub(crate) mod updater;
 pub(crate) mod virtual_display;
 pub mod webrtc;
 
@@ -196,7 +197,9 @@ pub fn run() {
         let primary_target = crate::webrtc::enumerate_sources()
             .ok()
             .and_then(|sources| {
-                sources.into_iter().find(|s| s.kind == "screen" && s.is_primary)
+                sources
+                    .into_iter()
+                    .find(|s| s.kind == "screen" && s.is_primary)
             })
             .map(|primary| crate::webrtc::CaptureTarget {
                 kind: crate::webrtc::CaptureKind::Screen,
@@ -218,12 +221,14 @@ pub fn run() {
     *capture_target.lock() = Some(initial_target);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .manage(command_state)
         .manage(cli_ip_state)
         .invoke_handler(tauri::generate_handler![
             commands::check_accessibility_permission,
+            commands::check_for_updates,
             commands::check_screen_recording_permission,
             commands::check_wifi_connection,
             commands::close_source_picker_window,
@@ -232,10 +237,12 @@ pub fn run() {
             commands::create_waiting_session,
             commands::destroy_all_virtual_displays,
             commands::destroy_virtual_display,
+            commands::download_and_install_update,
             commands::enumerate_capture_sources,
             commands::exit_app,
             commands::get_active_virtual_displays,
             commands::get_app_language,
+            commands::get_auto_check_update,
             commands::get_capture_source_preview,
             commands::get_capture_target,
             commands::get_connected_devices,
@@ -260,6 +267,7 @@ pub fn run() {
             commands::reset_waiting_session,
             commands::set_app_language,
             commands::set_app_started_once,
+            commands::set_auto_check_update,
             commands::set_capture_target,
             commands::set_desktop_capturer_source_id,
             commands::set_device_connected_status,

@@ -9,18 +9,57 @@
         </div>
       </div>
       <div class="tray-head-actions">
-        <button class="tray-devices" type="button" :aria-label="t('devices.title')" @click="showDevices = true">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 4h10M9 16h6" /></svg>
+        <button
+          class="tray-devices"
+          type="button"
+          :aria-label="t('devices.title')"
+          @click="showDevices = true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 4h10M9 16h6"
+            />
+          </svg>
           <strong v-if="viewerCount > 0">{{ viewerCount }}</strong>
         </button>
-        <button class="tray-settings" type="button" :aria-label="t('settings.title')" @click="showSettings = true">
+        <button
+          class="tray-settings"
+          type="button"
+          :aria-label="t('settings.title')"
+          @click="showSettings = true"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-            <path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.7a1.8 1.8 0 0 1 0-3h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3h-.2a1.8 1.8 0 0 0-.9 3Z" />
+            <path
+              d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.7a1.8 1.8 0 0 1 0-3h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3h-.2a1.8 1.8 0 0 0-.9 3Z"
+            />
           </svg>
+          <span v-if="newVersionAvailable" class="tray-settings-dot" aria-hidden="true" />
         </button>
       </div>
     </header>
+
+    <div v-if="newVersionAvailable && showUpdateBanner" class="tray-update-banner" role="status">
+      <div class="tray-update-badge">
+        <span class="tray-update-icon" aria-hidden="true">🚀</span>
+        <div class="tray-update-text">
+          <strong>{{ t('updater.bannerTitle', { version: newVersionAvailable }) }}</strong>
+        </div>
+      </div>
+      <div class="tray-update-actions">
+        <button class="tray-update-btn" type="button" @click="showUpdateModal = true">
+          {{ t('updater.bannerAction') }}
+        </button>
+        <button
+          class="tray-update-dismiss"
+          type="button"
+          aria-label="Dismiss"
+          @click="showUpdateBanner = false"
+        >
+          ×
+        </button>
+      </div>
+    </div>
 
     <div v-if="!permissionGranted" class="tray-permission-banner" role="alert">
       <div class="tray-perm-badge">
@@ -41,25 +80,28 @@
     <section class="tray-controls" aria-label="Share controls">
       <div class="tray-actions">
         <button class="tray-action tray-exit" type="button" @click="exitApp">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M13 8l4 4-4 4M9 12h8" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M13 8l4 4-4 4M9 12h8" />
+          </svg>
           <span>{{ t('app.exit') }}</span>
         </button>
       </div>
     </section>
 
-    <ConnectedDevicesListDrawer
-      :open="showDevices"
-      @close="showDevices = false"
-    />
-    <SettingsOverlay
-      :open="showSettings"
-      @close="showSettings = false"
-      @reset="onReset"
-    />
+    <ConnectedDevicesListDrawer :open="showDevices" @close="showDevices = false" />
+    <SettingsOverlay :open="showSettings" @close="showSettings = false" @reset="onReset" />
     <PermissionGuideModal
       :open="showPermissionGuide"
       @close="showPermissionGuide = false"
       @granted="checkPermission"
+    />
+    <UpdateModal
+      :open="showUpdateModal"
+      :update-info="updateInfo"
+      :checking="checkingUpdate"
+      :error="updateError"
+      @close="showUpdateModal = false"
+      @check="() => runUpdateCheck(true)"
     />
   </main>
 </template>
@@ -73,7 +115,8 @@ import SourcePicker from './SourcePicker.vue';
 import ConnectedDevicesListDrawer from './ConnectedDevicesListDrawer.vue';
 import SettingsOverlay from './SettingsOverlay.vue';
 import PermissionGuideModal from './PermissionGuideModal.vue';
-import { api } from '../utils/api';
+import UpdateModal from './UpdateModal.vue';
+import { api, type UpdateInfo } from '../utils/api';
 import logoUrl from '../../src-tauri/icons/icon.png';
 
 const { t } = useI18n();
@@ -82,8 +125,51 @@ const showSettings = ref(false);
 const showPermissionGuide = ref(false);
 const permissionGranted = ref(true);
 const viewerCount = ref(0);
+
+const newVersionAvailable = ref<string | null>(null);
+const showUpdateBanner = ref(true);
+const showUpdateModal = ref(false);
+const checkingUpdate = ref(false);
+const updateInfo = ref<UpdateInfo | null>(null);
+const updateError = ref<string | null>(null);
+
 let poll: number | undefined;
 let unlistenTray: UnlistenFn | undefined;
+
+async function runUpdateCheck(manual = false) {
+  if (manual) {
+    showUpdateModal.value = true;
+  }
+  checkingUpdate.value = true;
+  updateError.value = null;
+  try {
+    const info = await api.checkForUpdates();
+    updateInfo.value = info;
+    if (info.hasUpdate) {
+      newVersionAvailable.value = info.latestVersion;
+      showUpdateBanner.value = true;
+    } else {
+      newVersionAvailable.value = null;
+    }
+  } catch (err) {
+    updateError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    checkingUpdate.value = false;
+  }
+}
+
+async function checkUpdateOnStartup() {
+  try {
+    const autoCheck = await api.getAutoCheckUpdate();
+    if (autoCheck) {
+      window.setTimeout(() => {
+        void runUpdateCheck(false);
+      }, 1500);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 async function checkPermission() {
   try {
@@ -127,6 +213,7 @@ async function exitApp() {
 onMounted(() => {
   void refreshState();
   void checkPermission();
+  void checkUpdateOnStartup();
   poll = window.setInterval(refreshState, 2000);
   void listen('tray-panel-opened', () => {
     void checkPermission();
@@ -180,7 +267,7 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--muted);
   font-size: 10px;
-  letter-spacing: .14em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -222,6 +309,21 @@ onBeforeUnmount(() => {
   color: var(--text-strong);
   border-color: var(--accent-line);
   background: var(--accent-dim);
+}
+
+.tray-settings {
+  position: relative;
+}
+
+.tray-settings-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--control);
 }
 
 .tray-devices {
@@ -270,6 +372,100 @@ onBeforeUnmount(() => {
 
 .tray-source {
   margin-top: 12px;
+}
+
+.tray-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: var(--radius-md);
+  animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.tray-update-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tray-update-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tray-update-text {
+  min-width: 0;
+}
+
+.tray-update-text strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tray-update-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.tray-update-btn:hover {
+  background: var(--accent-strong);
+}
+
+.tray-update-dismiss {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.tray-update-dismiss:hover {
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--text);
 }
 
 .tray-permission-banner {
@@ -325,11 +521,11 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-sm, 6px);
   cursor: pointer;
-  transition: opacity .15s ease;
+  transition: opacity 0.15s ease;
 }
 
 .tray-perm-btn:hover {
-  opacity: .9;
+  opacity: 0.9;
 }
 
 .tray-controls {
@@ -353,7 +549,15 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--danger) 9%, var(--surface));
 }
 
-.tray-exit svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.tray-exit svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
 
 .tray-action {
   display: flex;
@@ -374,10 +578,13 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 
-.tray-exit:hover { color: #fff; border-color: var(--danger); background: var(--danger); }
+.tray-exit:hover {
+  color: #fff;
+  border-color: var(--danger);
+  background: var(--danger);
+}
 
 :deep(.source-picker) {
   padding: 14px;
 }
-
 </style>

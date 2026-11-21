@@ -19,14 +19,53 @@
               {{ permissionGranted ? t('permission.granted') : t('permission.required') }}
             </strong>
           </div>
-          <button class="st-icon-button" type="button" :aria-label="t('permission.openSettings')" @click="openPermissionSettings">
+          <button
+            class="st-icon-button"
+            type="button"
+            :aria-label="t('permission.openSettings')"
+            @click="openPermissionSettings"
+          >
             <span aria-hidden="true">↗</span>
           </button>
         </section>
 
-        <section class="st-section">
-          <span class="st-label">{{ t('settings.version') }}</span>
-          <span class="st-value st-mono">{{ version || '—' }}</span>
+        <section class="st-section st-version-section">
+          <div class="st-version-info">
+            <span class="st-label">{{ t('settings.version') }}</span>
+            <div class="st-version-row">
+              <span class="st-value st-mono">{{ version ? `v${version}` : '—' }}</span>
+              <span v-if="updateInfo?.hasUpdate" class="st-badge-update">
+                {{ t('settings.newVersionFound') }}
+              </span>
+              <span v-else-if="checkedOnce && !checking" class="st-badge-ok">
+                {{ t('settings.upToDate') }}
+              </span>
+            </div>
+          </div>
+          <button
+            class="st-btn-check"
+            type="button"
+            :disabled="checking"
+            @click="handleCheckUpdates"
+          >
+            <span v-if="checking" class="st-spinner-small" aria-hidden="true" />
+            <span>{{
+              checking ? t('settings.checkingUpdates') : t('settings.checkForUpdates')
+            }}</span>
+          </button>
+        </section>
+
+        <section class="st-section st-inline-section">
+          <label class="st-label" for="auto-update-toggle">{{
+            t('settings.autoCheckUpdates')
+          }}</label>
+          <input
+            id="auto-update-toggle"
+            type="checkbox"
+            class="st-switch"
+            :checked="autoCheckEnabled"
+            @change="toggleAutoCheck"
+          />
         </section>
 
         <button class="st-section st-project" type="button" @click="openProjectHomepage">
@@ -52,8 +91,15 @@
       @close="showPermissionGuide = false"
       @granted="checkPermission"
     />
+    <UpdateModal
+      :open="showUpdateModal"
+      :update-info="updateInfo"
+      :checking="checking"
+      :error="updateError"
+      @close="showUpdateModal = false"
+      @check="handleCheckUpdates"
+    />
   </Teleport>
-
 </template>
 
 <script setup lang="ts">
@@ -61,7 +107,8 @@ import { onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import LanguageSelector from './LanguageSelector.vue';
 import PermissionGuideModal from './PermissionGuideModal.vue';
-import { api } from '../utils/api';
+import UpdateModal from './UpdateModal.vue';
+import { api, type UpdateInfo } from '../utils/api';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{
@@ -74,13 +121,50 @@ const version = ref('');
 const permissionGranted = ref(false);
 const showPermissionGuide = ref(false);
 
+const showUpdateModal = ref(false);
+const checking = ref(false);
+const checkedOnce = ref(false);
+const updateInfo = ref<UpdateInfo | null>(null);
+const updateError = ref<string | null>(null);
+const autoCheckEnabled = ref(true);
+
 onMounted(async () => {
   try {
     version.value = await api.getCurrentVersion();
   } catch {
     version.value = '';
   }
+  try {
+    autoCheckEnabled.value = await api.getAutoCheckUpdate();
+  } catch {
+    autoCheckEnabled.value = true;
+  }
 });
+
+async function toggleAutoCheck(e: Event) {
+  const target = e.target as HTMLInputElement;
+  autoCheckEnabled.value = target.checked;
+  try {
+    await api.setAutoCheckUpdate(target.checked);
+  } catch (err) {
+    console.error('Failed to set auto check update:', err);
+  }
+}
+
+async function handleCheckUpdates() {
+  checking.value = true;
+  updateError.value = null;
+  showUpdateModal.value = true;
+  try {
+    const info = await api.checkForUpdates();
+    updateInfo.value = info;
+    checkedOnce.value = true;
+  } catch (err) {
+    updateError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    checking.value = false;
+  }
+}
 
 async function checkPermission() {
   try {
@@ -113,9 +197,13 @@ async function openProjectHomepage() {
   await api.openExternalLink('https://github.com/xbl/ScreenMirror');
 }
 
-watch(() => props.open, (open) => {
-  if (open) void checkPermission();
-}, { immediate: true });
+watch(
+  () => props.open,
+  (open) => {
+    if (open) void checkPermission();
+  },
+  { immediate: true },
+);
 
 async function onReset() {
   try {
@@ -278,6 +366,112 @@ async function onReset() {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.7;
+}
+
+.st-version-section {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.st-version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.st-version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.st-badge-update {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.st-badge-ok {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success);
+}
+
+.st-btn-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--control);
+  border: var(--line);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.st-btn-check:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+
+.st-btn-check:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.st-spinner-small {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.st-switch {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease;
+}
+
+.st-switch:checked {
+  background: var(--accent);
+}
+
+.st-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.st-switch:checked::after {
+  transform: translateX(16px);
 }
 
 .st-label {
